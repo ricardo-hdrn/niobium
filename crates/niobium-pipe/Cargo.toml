@@ -1,0 +1,20 @@
+[package]
+name = "niobium-pipe"
+version = "0.1.0"
+edition = "2024"
+description = "Secure data pipeline engine for Niobium — routes sensitive form data directly to sinks"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "process", "io-util", "time", "rt"] }
+tracing = "0.1"
+async-trait = "0.1"
+anyhow = "1"
+getrandom = "0.3"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6"

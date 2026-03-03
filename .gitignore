@@ -1,0 +1,38 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Flutter
+app/build/
+app/.dart_tool/
+app/.packages
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/pubspec.lock
+app/.metadata
+app/linux/flutter/ephemeral/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime
+*.port
+*.pid
+*.log
+
+# npm platform packages — build artifacts
+packages/niobium-linux-x64/bin/
+
+# Claude
+.claude/
+CLAUDE.md
+.mcp.json

@@ -1,0 +1,23 @@
+{
+  "name": "niobium-mcp",
+  "version": "0.1.0",
+  "description": "Native GUI runtime for CLI AI agents, exposed via MCP",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ricardo-hdrn/niobium"
+  },
+  "bin": {
+    "niobium": "bin/niobium"
+  },
+  "files": [
+    "bin/niobium",
+    "README.md"
+  ],
+  "optionalDependencies": {
+    "niobium-mcp-linux-x64": "0.1.0"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}

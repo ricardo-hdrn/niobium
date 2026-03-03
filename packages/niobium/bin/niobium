@@ -1,0 +1,43 @@
+#!/usr/bin/env node
+
+const { execFileSync } = require("child_process");
+const path = require("path");
+const os = require("os");
+
+const PLATFORMS = {
+  "linux-x64": "niobium-mcp-linux-x64",
+};
+
+const key = `${os.platform()}-${os.arch()}`;
+const pkg = PLATFORMS[key];
+
+if (!pkg) {
+  console.error(
+    `niobium: unsupported platform ${key}\n` +
+      `Supported: ${Object.keys(PLATFORMS).join(", ")}`
+  );
+  process.exit(1);
+}
+
+let binPath;
+try {
+  binPath = path.join(
+    path.dirname(require.resolve(`${pkg}/package.json`)),
+    "bin",
+    "niobium"
+  );
+} catch {
+  console.error(
+    `niobium: platform package ${pkg} not installed.\n` +
+      `Run: npm install ${pkg}`
+  );
+  process.exit(1);
+}
+
+try {
+  const result = execFileSync(binPath, process.argv.slice(2), {
+    stdio: "inherit",
+  });
+} catch (e) {
+  process.exit(e.status ?? 1);
+}
