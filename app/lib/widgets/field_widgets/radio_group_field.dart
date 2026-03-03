@@ -137,7 +137,9 @@ class _NbRadioGroupFieldState extends State<NbRadioGroupField> {
                         children: [
                           Radio<dynamic>(
                             value: opt.value,
+                            // ignore: deprecated_member_use
                             groupValue: widget.value,
+                            // ignore: deprecated_member_use
                             onChanged: (v) {
                               widget.onChanged(v);
                               state.didChange(v);

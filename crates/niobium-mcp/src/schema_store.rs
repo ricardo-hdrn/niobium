@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use tracing::debug;
 
 use crate::error::NiobiumError;
@@ -89,13 +89,11 @@ impl SchemaStore {
         schema: &serde_json::Value,
         description: &str,
     ) -> Result<SavedForm, NiobiumError> {
-        let next_version: i64 = self
-            .conn
-            .query_row(
-                "SELECT COALESCE(MAX(version), 0) + 1 FROM forms WHERE name = ?1",
-                params![name],
-                |row| row.get(0),
-            )?;
+        let next_version: i64 = self.conn.query_row(
+            "SELECT COALESCE(MAX(version), 0) + 1 FROM forms WHERE name = ?1",
+            params![name],
+            |row| row.get(0),
+        )?;
 
         let schema_str = serde_json::to_string(schema)
             .map_err(|e| NiobiumError::StorageError(format!("cannot serialize schema: {e}")))?;
@@ -205,7 +203,10 @@ impl SchemaStore {
     }
 
     /// Get the most recent submission for a given form name (for pre-fill).
-    pub fn last_submission(&self, form_name: &str) -> Result<Option<serde_json::Value>, NiobiumError> {
+    pub fn last_submission(
+        &self,
+        form_name: &str,
+    ) -> Result<Option<serde_json::Value>, NiobiumError> {
         let result = self
             .conn
             .query_row(
@@ -239,7 +240,9 @@ mod tests {
             }
         });
 
-        let saved = store.save_form("test-form", &schema, "A test form").unwrap();
+        let saved = store
+            .save_form("test-form", &schema, "A test form")
+            .unwrap();
         assert_eq!(saved.name, "test-form");
         assert_eq!(saved.version, 1);
 

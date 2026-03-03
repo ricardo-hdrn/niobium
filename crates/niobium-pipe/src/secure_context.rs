@@ -90,7 +90,7 @@ impl SecureContext {
             }
             other => {
                 // Check non-string values for exact match (e.g. secret number 42)
-                for (_, real_value) in &self.secrets {
+                for real_value in self.secrets.values() {
                     if other == real_value {
                         return Value::String(REDACTED.to_string());
                     }
@@ -111,7 +111,7 @@ impl SecureContext {
 
     fn redact_string(&self, s: &str) -> Value {
         let mut result = s.to_string();
-        for (_, real_value) in &self.secrets {
+        for real_value in self.secrets.values() {
             let needle = match real_value {
                 Value::String(secret) if !secret.is_empty() => secret.clone(),
                 _ => continue,
@@ -274,8 +274,7 @@ mod tests {
     #[test]
     fn redact_scrubs_secret_values_from_output() {
         let mut data = json!({"api_key": "key-abc-123", "token": "tok-xyz"});
-        let ctx =
-            SecureContext::extract(&mut data, &["api_key".into(), "token".into()]).unwrap();
+        let ctx = SecureContext::extract(&mut data, &["api_key".into(), "token".into()]).unwrap();
 
         // Simulate an API response that echoes back the secrets
         let api_response = json!({

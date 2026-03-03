@@ -22,6 +22,7 @@ class NbEnumField extends StatelessWidget {
         labelText: field.label + (field.required ? ' *' : ''),
         hintText: field.description,
       ),
+      // ignore: deprecated_member_use
       value: value,
       items: field.enumValues!.map((v) {
         return DropdownMenuItem(

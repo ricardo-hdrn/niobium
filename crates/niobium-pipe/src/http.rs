@@ -89,9 +89,11 @@ impl Stage for HttpStage {
         debug!(stage = self.config.name, %url, "executing HTTP stage");
 
         // Build request
-        let method: reqwest::Method = self.config.method.parse().map_err(|_| {
-            anyhow::anyhow!("invalid HTTP method: {}", self.config.method)
-        })?;
+        let method: reqwest::Method = self
+            .config
+            .method
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid HTTP method: {}", self.config.method))?;
         let mut req = self.client.request(method, &url);
 
         // Render and apply headers
@@ -117,20 +119,20 @@ impl Stage for HttpStage {
         let status = response.status().as_u16();
 
         // Check expected status
-        if let Some(ref expect) = self.config.expect {
-            if status != expect.status {
-                let error_msg = format!(
-                    "stage '{}': expected status {}, got {status}",
-                    self.config.name, expect.status
-                );
-                if let Some(ref on_error) = self.config.on_error {
-                    let _ = events.send(PipeEvent::Toast {
-                        message: on_error.toast.clone(),
-                        severity: Severity::Error,
-                    });
-                }
-                bail!(error_msg);
+        if let Some(ref expect) = self.config.expect
+            && status != expect.status
+        {
+            let error_msg = format!(
+                "stage '{}': expected status {}, got {status}",
+                self.config.name, expect.status
+            );
+            if let Some(ref on_error) = self.config.on_error {
+                let _ = events.send(PipeEvent::Toast {
+                    message: on_error.toast.clone(),
+                    severity: Severity::Error,
+                });
             }
+            bail!(error_msg);
         }
 
         // Parse response body
@@ -172,7 +174,10 @@ mod tests {
     use wiremock::matchers::{body_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn make_events() -> (mpsc::UnboundedSender<PipeEvent>, mpsc::UnboundedReceiver<PipeEvent>) {
+    fn make_events() -> (
+        mpsc::UnboundedSender<PipeEvent>,
+        mpsc::UnboundedReceiver<PipeEvent>,
+    ) {
         mpsc::unbounded_channel()
     }
 
@@ -193,7 +198,9 @@ mod tests {
             headers: None,
             body: Some(json!({"name": "${name}"})),
             expect: Some(ExpectConfig { status: 201 }),
-            on_success: Some(ToastConfig { toast: "User created!".into() }),
+            on_success: Some(ToastConfig {
+                toast: "User created!".into(),
+            }),
             on_error: None,
         };
 
@@ -206,7 +213,13 @@ mod tests {
         assert_eq!(result["body"]["id"], 1);
 
         let event = rx.try_recv().unwrap();
-        assert!(matches!(event, PipeEvent::Toast { severity: Severity::Success, .. }));
+        assert!(matches!(
+            event,
+            PipeEvent::Toast {
+                severity: Severity::Success,
+                ..
+            }
+        ));
     }
 
     #[tokio::test]
@@ -226,7 +239,9 @@ mod tests {
             body: None,
             expect: Some(ExpectConfig { status: 200 }),
             on_success: None,
-            on_error: Some(ToastConfig { toast: "Request failed!".into() }),
+            on_error: Some(ToastConfig {
+                toast: "Request failed!".into(),
+            }),
         };
 
         let stage = HttpStage::new(config);
@@ -236,7 +251,13 @@ mod tests {
         assert!(err.to_string().contains("expected status 200, got 500"));
 
         let event = rx.try_recv().unwrap();
-        assert!(matches!(event, PipeEvent::Toast { severity: Severity::Error, .. }));
+        assert!(matches!(
+            event,
+            PipeEvent::Toast {
+                severity: Severity::Error,
+                ..
+            }
+        ));
     }
 
     #[tokio::test]

@@ -162,7 +162,16 @@ fn install_claude() -> anyhow::Result<()> {
     println!("Registering Niobium with Claude Code...");
 
     let status = Command::new("claude")
-        .args(["mcp", "add", "--transport", "stdio", "niobium", "--", exe_str, "serve"])
+        .args([
+            "mcp",
+            "add",
+            "--transport",
+            "stdio",
+            "niobium",
+            "--",
+            exe_str,
+            "serve",
+        ])
         .status()?;
 
     if status.success() {

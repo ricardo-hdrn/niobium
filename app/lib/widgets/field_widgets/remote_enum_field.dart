@@ -100,6 +100,7 @@ class _NbRemoteEnumFieldState extends State<NbRemoteEnumField> {
         labelText: label,
         hintText: widget.field.description ?? '${_options!.length} options loaded',
       ),
+      // ignore: deprecated_member_use
       value: widget.value,
       items: _options!.map((opt) {
         return DropdownMenuItem(
