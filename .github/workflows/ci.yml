@@ -60,8 +60,13 @@ jobs:
         if: matrix.use-cross
         run: cargo install cross --locked
 
-      - name: Test
-        run: ${{ matrix.use-cross && 'cross' || 'cargo' }} test ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+      - name: Build (cross-compiled targets)
+        if: matrix.use-cross
+        run: cross build --all-targets ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+
+      - name: Test (native targets)
+        if: ${{ !matrix.use-cross }}
+        run: cargo test
 
   flutter:
     name: Flutter (analyze)
