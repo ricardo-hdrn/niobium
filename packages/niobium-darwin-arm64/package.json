@@ -1,0 +1,16 @@
+{
+  "name": "niobium-mcp-darwin-arm64",
+  "version": "0.1.0",
+  "description": "Niobium macOS ARM64 binaries",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ricardo-hdrn/niobium"
+  },
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": [
+    "bin/"
+  ],
+  "preferUnplugged": true
+}
