@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::{broadcast, oneshot, Mutex};
+use tokio::sync::{Mutex, broadcast, oneshot};
 use tracing::debug;
 
 use super::events::{Event, RequestId};
@@ -22,6 +22,12 @@ pub struct EventBus {
     /// (e.g. ShowForm), it registers a oneshot channel here. When the
     /// response event arrives, the bus completes the oneshot.
     pending: Arc<Mutex<HashMap<RequestId, oneshot::Sender<Event>>>>,
+}
+
+impl Default for EventBus {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EventBus {
@@ -109,10 +115,10 @@ impl EventBus {
                     let is_shutdown = matches!(event, Event::Shutdown);
 
                     // Route response events to their pending requests
-                    if Self::is_response(&event) {
-                        if let Some(id) = event.request_id() {
-                            self.resolve(id, event).await;
-                        }
+                    if Self::is_response(&event)
+                        && let Some(id) = event.request_id()
+                    {
+                        self.resolve(id, event).await;
                     }
 
                     if is_shutdown {
@@ -162,7 +168,11 @@ mod tests {
 
     /// Helper: set up a bus with router + responder, all subscribed before
     /// any events flow (avoids race conditions).
-    fn setup_bus() -> (EventBus, broadcast::Receiver<Event>, broadcast::Receiver<Event>) {
+    fn setup_bus() -> (
+        EventBus,
+        broadcast::Receiver<Event>,
+        broadcast::Receiver<Event>,
+    ) {
         let bus = EventBus::new();
         let router_rx = bus.subscribe();
         let responder_rx = bus.subscribe();

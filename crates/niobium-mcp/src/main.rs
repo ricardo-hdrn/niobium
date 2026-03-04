@@ -112,7 +112,7 @@ fn find_flutter_binary() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
 
-    // niobium-app (symlink or renamed)
+    // niobium-app (symlink or renamed — also covers macOS symlink to .app)
     let dash = dir.join("niobium-app");
     if dash.exists() {
         return Some(dash);
@@ -128,6 +128,22 @@ fn find_flutter_binary() -> Option<PathBuf> {
     let bundle = dir.join("niobium-app").join("niobium_app");
     if bundle.exists() {
         return Some(bundle);
+    }
+
+    // Windows: niobium-app/niobium_app.exe
+    let bundle_exe = dir.join("niobium-app").join("niobium_app.exe");
+    if bundle_exe.exists() {
+        return Some(bundle_exe);
+    }
+
+    // macOS .app bundle: niobium-app.app/Contents/MacOS/niobium_app
+    let app_bundle = dir
+        .join("niobium-app.app")
+        .join("Contents")
+        .join("MacOS")
+        .join("niobium_app");
+    if app_bundle.exists() {
+        return Some(app_bundle);
     }
 
     None
@@ -146,7 +162,16 @@ fn install_claude() -> anyhow::Result<()> {
     println!("Registering Niobium with Claude Code...");
 
     let status = Command::new("claude")
-        .args(["mcp", "add", "--transport", "stdio", "niobium", "--", exe_str, "serve"])
+        .args([
+            "mcp",
+            "add",
+            "--transport",
+            "stdio",
+            "niobium",
+            "--",
+            exe_str,
+            "serve",
+        ])
         .status()?;
 
     if status.success() {

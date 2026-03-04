@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - platform-key: linux-x64
+            os: ubuntu-latest
+            rust-target: x86_64-unknown-linux-gnu
+            flutter-platform: linux
+            binary: niobium
+            bundle-path: app/build/linux/x64/release/bundle
+          - platform-key: darwin-x64
+            os: macos-13
+            rust-target: x86_64-apple-darwin
+            flutter-platform: macos
+            binary: niobium
+            bundle-path: app/build/macos/Build/Products/Release
+          - platform-key: darwin-arm64
+            os: macos-latest
+            rust-target: aarch64-apple-darwin
+            flutter-platform: macos
+            binary: niobium
+            bundle-path: app/build/macos/Build/Products/Release
+          - platform-key: win32-x64
+            os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            flutter-platform: windows
+            binary: niobium.exe
+            bundle-path: app/build/windows/x64/runner/Release
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.rust-target }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libgtk-3-dev pkg-config
+
+      - name: Flutter pub get
+        working-directory: app
+        run: flutter pub get
+
+      - name: Build Rust CLI
+        run: cargo build --release --package niobium-mcp --target ${{ matrix.rust-target }}
+
+      - name: Build Flutter desktop app
+        working-directory: app
+        run: flutter build ${{ matrix.flutter-platform }} --release
+
+      # ── Package into npm-compatible bin/ structure ──────────────────
+
+      - name: Package (Linux)
+        if: matrix.platform-key == 'linux-x64'
+        run: |
+          mkdir -p staging/bin
+          cp target/${{ matrix.rust-target }}/release/${{ matrix.binary }} staging/bin/
+          cp -r ${{ matrix.bundle-path }} staging/bin/niobium-app
+          tar czf niobium-mcp-${{ matrix.platform-key }}.tar.gz -C staging bin
+
+      - name: Package (macOS)
+        if: startsWith(matrix.platform-key, 'darwin')
+        run: |
+          mkdir -p staging/bin
+          cp target/${{ matrix.rust-target }}/release/${{ matrix.binary }} staging/bin/
+          # Copy the .app bundle, then create a symlink so the trampoline finds it
+          cp -r ${{ matrix.bundle-path }}/niobium_app.app staging/bin/niobium-app.app
+          ln -s niobium-app.app/Contents/MacOS/niobium_app staging/bin/niobium-app
+          tar czf niobium-mcp-${{ matrix.platform-key }}.tar.gz -C staging bin
+
+      - name: Package (Windows)
+        if: matrix.platform-key == 'win32-x64'
+        shell: bash
+        run: |
+          mkdir -p staging/bin
+          cp target/${{ matrix.rust-target }}/release/${{ matrix.binary }} staging/bin/
+          cp -r "${{ matrix.bundle-path }}" staging/bin/niobium-app
+          cd staging
+          7z a ../niobium-mcp-${{ matrix.platform-key }}.zip bin
+
+      # ── Smoke test ─────────────────────────────────────────────────
+
+      - name: Smoke test
+        if: runner.os != 'Windows'
+        run: ./target/${{ matrix.rust-target }}/release/niobium --help
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        run: ./target/${{ matrix.rust-target }}/release/niobium.exe --help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: niobium-mcp-${{ matrix.platform-key }}
+          path: niobium-mcp-${{ matrix.platform-key }}.*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: List assets
+        run: ls -la niobium-mcp-*
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: niobium-mcp-*
+          generate_release_notes: true

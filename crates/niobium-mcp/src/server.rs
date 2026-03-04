@@ -5,7 +5,7 @@ use std::sync::Arc;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::*;
-use rmcp::{schemars, tool, tool_handler, tool_router, ServerHandler};
+use rmcp::{ServerHandler, schemars, tool, tool_handler, tool_router};
 use serde_json::Value;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -87,7 +87,9 @@ pub struct ShowFormInput {
     /// HTTP sink definition — form data is sent directly to this endpoint, bypassing the LLM.
     /// Sensitive field values (marked x-sensitive in schema) are redacted before returning to the agent.
     #[serde(rename = "x-sink")]
-    #[schemars(description = "HTTP sink: form data sent directly to endpoint, sensitive fields redacted from agent response")]
+    #[schemars(
+        description = "HTTP sink: form data sent directly to endpoint, sensitive fields redacted from agent response"
+    )]
     pub sink: Option<Value>,
 
     /// Multi-stage pipeline — array of HTTP stage definitions executed in sequence.
@@ -97,11 +99,15 @@ pub struct ShowFormInput {
     pub pipe: Option<Value>,
 
     /// Window width — preset mode ("narrow", "normal", "wide", "full") or pixel value
-    #[schemars(description = "Window width: \"narrow\" (420) / \"normal\" (580) / \"wide\" (800) / \"full\" (1100) or pixel value")]
+    #[schemars(
+        description = "Window width: \"narrow\" (420) / \"normal\" (580) / \"wide\" (800) / \"full\" (1100) or pixel value"
+    )]
     pub width: Option<Dimension>,
 
     /// Window height — preset mode ("short", "normal", "tall", "full") or pixel value
-    #[schemars(description = "Window height: \"short\" (400) / \"normal\" (720) / \"tall\" (900) / \"full\" (1080) or pixel value")]
+    #[schemars(
+        description = "Window height: \"short\" (400) / \"normal\" (720) / \"tall\" (900) / \"full\" (1080) or pixel value"
+    )]
     pub height: Option<Dimension>,
 
     /// Field density — controls spacing between fields
@@ -113,7 +119,9 @@ pub struct ShowFormInput {
     pub animate: Option<bool>,
 
     /// Accent color — preset name or hex value
-    #[schemars(description = "Accent color: \"teal\" / \"blue\" / \"purple\" / \"amber\" / \"red\" / \"green\" or \"#RRGGBB\"")]
+    #[schemars(
+        description = "Accent color: \"teal\" / \"blue\" / \"purple\" / \"amber\" / \"red\" / \"green\" or \"#RRGGBB\""
+    )]
     pub accent: Option<String>,
 }
 
@@ -133,15 +141,21 @@ pub struct ShowOutputInput {
     pub title: Option<String>,
 
     /// Window width — preset mode or pixel value (default: "normal" / 580)
-    #[schemars(description = "Window width: \"narrow\" (420) / \"normal\" (580) / \"wide\" (800) / \"full\" (1100) or pixel value")]
+    #[schemars(
+        description = "Window width: \"narrow\" (420) / \"normal\" (580) / \"wide\" (800) / \"full\" (1100) or pixel value"
+    )]
     pub width: Option<Dimension>,
 
     /// Window height — preset mode or pixel value (default: "normal" / 720)
-    #[schemars(description = "Window height: \"short\" (400) / \"normal\" (720) / \"tall\" (900) / \"full\" (1080) or pixel value")]
+    #[schemars(
+        description = "Window height: \"short\" (400) / \"normal\" (720) / \"tall\" (900) / \"full\" (1080) or pixel value"
+    )]
     pub height: Option<Dimension>,
 
     /// Accent color — preset name or hex value
-    #[schemars(description = "Accent color: \"teal\" / \"blue\" / \"purple\" / \"amber\" / \"red\" / \"green\" or \"#RRGGBB\"")]
+    #[schemars(
+        description = "Accent color: \"teal\" / \"blue\" / \"purple\" / \"amber\" / \"red\" / \"green\" or \"#RRGGBB\""
+    )]
     pub accent: Option<String>,
 }
 
@@ -156,15 +170,21 @@ pub struct ShowConfirmationInput {
     pub title: Option<String>,
 
     /// Window width — preset mode or pixel value
-    #[schemars(description = "Window width: \"narrow\" (420) / \"normal\" (580) / \"wide\" (800) / \"full\" (1100) or pixel value")]
+    #[schemars(
+        description = "Window width: \"narrow\" (420) / \"normal\" (580) / \"wide\" (800) / \"full\" (1100) or pixel value"
+    )]
     pub width: Option<Dimension>,
 
     /// Window height — preset mode or pixel value
-    #[schemars(description = "Window height: \"short\" (400) / \"normal\" (720) / \"tall\" (900) / \"full\" (1080) or pixel value")]
+    #[schemars(
+        description = "Window height: \"short\" (400) / \"normal\" (720) / \"tall\" (900) / \"full\" (1080) or pixel value"
+    )]
     pub height: Option<Dimension>,
 
     /// Accent color — preset name or hex value
-    #[schemars(description = "Accent color: \"teal\" / \"blue\" / \"purple\" / \"amber\" / \"red\" / \"green\" or \"#RRGGBB\"")]
+    #[schemars(
+        description = "Accent color: \"teal\" / \"blue\" / \"purple\" / \"amber\" / \"red\" / \"green\" or \"#RRGGBB\""
+    )]
     pub accent: Option<String>,
 }
 
@@ -224,6 +244,7 @@ impl NiobiumServer {
     }
 
     /// Emit a ShowForm event and await the response via the event bus.
+    #[allow(clippy::too_many_arguments)]
     async fn request_form(
         &self,
         schema: Value,
@@ -307,7 +328,16 @@ impl NiobiumServer {
 
         // Emit ShowForm event → UI bridge handles it → returns FormSubmitted
         let data = self
-            .request_form(input.schema.clone(), title, input.prefill, width, height, density, animate, accent)
+            .request_form(
+                input.schema.clone(),
+                title,
+                input.prefill,
+                width,
+                height,
+                density,
+                animate,
+                accent,
+            )
             .await?;
 
         // Record submission
@@ -353,8 +383,7 @@ impl NiobiumServer {
             data
         };
 
-        let json_str =
-            serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string());
+        let json_str = serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string());
         Ok(CallToolResult::success(vec![Content::text(json_str)]))
     }
 
@@ -518,12 +547,15 @@ impl NiobiumServer {
                 schema_json,
                 format!("{form_name} (v{form_version})"),
                 input.prefill,
-                None, None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
             )
             .await?;
 
-        let json_str =
-            serde_json::to_string_pretty(&data).unwrap_or_else(|_| data.to_string());
+        let json_str = serde_json::to_string_pretty(&data).unwrap_or_else(|_| data.to_string());
         Ok(CallToolResult::success(vec![Content::text(json_str)]))
     }
 }

@@ -69,7 +69,7 @@ Then add Niobium to your agent's MCP config. For **Claude Code**, add to `.mcp.j
 
 Restart your agent. Niobium tools are now available.
 
-> **Supported platforms:** Linux x64. macOS and Windows coming soon.
+> **Supported platforms:** Linux x64, macOS x64, macOS ARM64 (Apple Silicon), Windows x64.
 
 ## How It Works
 

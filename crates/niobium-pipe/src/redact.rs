@@ -49,10 +49,10 @@ fn redact_path(value: &mut Value, path: &str) {
     for (i, segment) in segments.iter().enumerate() {
         if i == segments.len() - 1 {
             // Last segment — redact if it exists
-            if let Value::Object(map) = current {
-                if map.contains_key(*segment) {
-                    map.insert(segment.to_string(), Value::String(REDACTED.to_string()));
-                }
+            if let Value::Object(map) = current
+                && map.contains_key(*segment)
+            {
+                map.insert(segment.to_string(), Value::String(REDACTED.to_string()));
             }
         } else {
             // Intermediate segment — descend
@@ -145,10 +145,10 @@ pub fn redact_sensitive(schema: &Value, data: &mut Value) {
         }
 
         // Recurse into nested objects
-        if field_schema.get("type").and_then(|t| t.as_str()) == Some("object") {
-            if let Some(nested_data) = data_obj.get_mut(field_name) {
-                redact_sensitive(field_schema, nested_data);
-            }
+        if field_schema.get("type").and_then(|t| t.as_str()) == Some("object")
+            && let Some(nested_data) = data_obj.get_mut(field_name)
+        {
+            redact_sensitive(field_schema, nested_data);
         }
     }
 }
