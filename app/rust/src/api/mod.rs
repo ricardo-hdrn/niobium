@@ -1,8 +1,8 @@
 //! FFI API functions exposed to Dart via flutter_rust_bridge.
 
-use std::sync::Arc;
-use std::pin::Pin;
 use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use flutter_rust_bridge::DartFnFuture;
 
@@ -38,23 +38,19 @@ pub async fn start_mcp_server(
     show_output: impl Fn(String) -> DartFnFuture<bool> + Send + Sync + 'static,
 ) -> anyhow::Result<()> {
     let show_form: niobium_mcp::api::ShowFormFn = Arc::new(move |payload: String| {
-        let fut = show_form(payload);
-        Box::pin(async move { fut.await }) as Pin<Box<dyn Future<Output = Option<String>> + Send>>
+        Box::pin(show_form(payload)) as Pin<Box<dyn Future<Output = Option<String>> + Send>>
     });
 
     let show_confirm: niobium_mcp::api::ShowConfirmFn = Arc::new(move |payload: String| {
-        let fut = show_confirm(payload);
-        Box::pin(async move { fut.await }) as Pin<Box<dyn Future<Output = bool> + Send>>
+        Box::pin(show_confirm(payload)) as Pin<Box<dyn Future<Output = bool> + Send>>
     });
 
     let show_toast: niobium_mcp::api::ShowToastFn = Arc::new(move |payload: String| {
-        let fut = show_toast(payload);
-        Box::pin(async move { fut.await }) as Pin<Box<dyn Future<Output = ()> + Send>>
+        Box::pin(show_toast(payload)) as Pin<Box<dyn Future<Output = ()> + Send>>
     });
 
     let show_output: niobium_mcp::api::ShowOutputFn = Arc::new(move |payload: String| {
-        let fut = show_output(payload);
-        Box::pin(async move { fut.await }) as Pin<Box<dyn Future<Output = bool> + Send>>
+        Box::pin(show_output(payload)) as Pin<Box<dyn Future<Output = bool> + Send>>
     });
 
     niobium_mcp::api::start_mcp_server_ffi(show_form, show_confirm, show_toast, show_output).await

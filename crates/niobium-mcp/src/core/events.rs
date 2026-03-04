@@ -13,7 +13,6 @@ pub type RequestId = Uuid;
 #[derive(Debug, Clone)]
 pub enum Event {
     // ── UI requests (MCP server → UI engine) ────────────────────────────
-
     /// Show a form and await user submission.
     ShowForm {
         request_id: RequestId,
@@ -49,36 +48,23 @@ pub enum Event {
     },
 
     // ── UI responses (UI engine → MCP server) ───────────────────────────
-
     /// User submitted form data.
-    FormSubmitted {
-        request_id: RequestId,
-        data: Value,
-    },
+    FormSubmitted { request_id: RequestId, data: Value },
 
     /// User cancelled a form.
-    FormCancelled {
-        request_id: RequestId,
-    },
+    FormCancelled { request_id: RequestId },
 
     /// User responded to a confirmation dialog.
-    Confirmed {
-        request_id: RequestId,
-        value: bool,
-    },
+    Confirmed { request_id: RequestId, value: bool },
 
     /// User dismissed an output display.
-    OutputDismissed {
-        request_id: RequestId,
-    },
+    OutputDismissed { request_id: RequestId },
 
     // ── Pipeline events ─────────────────────────────────────────────────
-
     /// A pipeline event (toast, stage progress) for UI forwarding.
     PipeEvent(niobium_pipe::PipeEvent),
 
     // ── Lifecycle ────────────────────────────────────────────────────────
-
     /// The runtime is shutting down.
     Shutdown,
 }

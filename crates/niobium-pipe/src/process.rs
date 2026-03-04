@@ -102,11 +102,12 @@ impl Stage for ProcessStage {
             )
         })?;
 
-        // Write input JSON to stdin, then close it
+        // Write input JSON to stdin, then close it.
+        // Ignore broken pipe — the process may exit before reading all input.
         let input_bytes = serde_json::to_vec(&input)?;
         if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(&input_bytes).await?;
-            // stdin is dropped here, closing it
+            let _ = stdin.write_all(&input_bytes).await;
+            let _ = stdin.shutdown().await;
         }
 
         let timeout_secs = self.config.timeout.unwrap_or(30);
@@ -179,7 +180,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn make_events() -> (mpsc::UnboundedSender<PipeEvent>, mpsc::UnboundedReceiver<PipeEvent>) {
+    fn make_events() -> (
+        mpsc::UnboundedSender<PipeEvent>,
+        mpsc::UnboundedReceiver<PipeEvent>,
+    ) {
         mpsc::unbounded_channel()
     }
 

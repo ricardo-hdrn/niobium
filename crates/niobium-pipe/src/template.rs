@@ -75,9 +75,9 @@ fn resolve_ref(ref_name: &str, context: &Value) -> Result<String> {
     // Dot-notation path walking: ${a.b.c} → context["a"]["b"]["c"]
     let mut current = context;
     for segment in ref_name.split('.') {
-        current = current
-            .get(segment)
-            .with_context(|| format!("template ref '${{{ref_name}}}': key '{segment}' not found"))?;
+        current = current.get(segment).with_context(|| {
+            format!("template ref '${{{ref_name}}}': key '{segment}' not found")
+        })?;
     }
 
     match current {
@@ -159,10 +159,7 @@ mod tests {
     #[test]
     fn numeric_value_to_string() {
         let ctx = json!({"port": 5432});
-        assert_eq!(
-            render_string("host:${port}", &ctx).unwrap(),
-            "host:5432"
-        );
+        assert_eq!(render_string("host:${port}", &ctx).unwrap(), "host:5432");
     }
 
     #[test]

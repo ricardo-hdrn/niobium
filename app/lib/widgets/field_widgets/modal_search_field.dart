@@ -328,6 +328,7 @@ class _SearchPageState extends State<_SearchPage> {
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           ),
+          // ignore: deprecated_member_use
           value: _filterValues[filter.param],
           items: [
             const DropdownMenuItem(value: '', child: Text('All')),

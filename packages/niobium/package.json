@@ -15,7 +15,10 @@
     "README.md"
   ],
   "optionalDependencies": {
-    "niobium-mcp-linux-x64": "0.1.0"
+    "niobium-mcp-linux-x64": "0.1.0",
+    "niobium-mcp-darwin-x64": "0.1.0",
+    "niobium-mcp-darwin-arm64": "0.1.0",
+    "niobium-mcp-win32-x64": "0.1.0"
   },
   "engines": {
     "node": ">=16"

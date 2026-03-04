@@ -6,6 +6,9 @@ const os = require("os");
 
 const PLATFORMS = {
   "linux-x64": "niobium-mcp-linux-x64",
+  "darwin-x64": "niobium-mcp-darwin-x64",
+  "darwin-arm64": "niobium-mcp-darwin-arm64",
+  "win32-x64": "niobium-mcp-win32-x64",
 };
 
 const key = `${os.platform()}-${os.arch()}`;
@@ -19,12 +22,14 @@ if (!pkg) {
   process.exit(1);
 }
 
+const binName = os.platform() === "win32" ? "niobium.exe" : "niobium";
+
 let binPath;
 try {
   binPath = path.join(
     path.dirname(require.resolve(`${pkg}/package.json`)),
     "bin",
-    "niobium"
+    binName
   );
 } catch {
   console.error(
@@ -35,7 +40,7 @@ try {
 }
 
 try {
-  const result = execFileSync(binPath, process.argv.slice(2), {
+  execFileSync(binPath, process.argv.slice(2), {
     stdio: "inherit",
   });
 } catch (e) {

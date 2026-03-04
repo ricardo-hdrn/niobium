@@ -32,8 +32,16 @@ impl std::fmt::Debug for Pipeline {
 }
 
 impl Pipeline {
-    pub fn new(stages: Vec<Box<dyn Stage>>, trusted: Vec<bool>, sensitive_fields: Vec<String>) -> Self {
-        Self { stages, trusted, sensitive_fields }
+    pub fn new(
+        stages: Vec<Box<dyn Stage>>,
+        trusted: Vec<bool>,
+        sensitive_fields: Vec<String>,
+    ) -> Self {
+        Self {
+            stages,
+            trusted,
+            sensitive_fields,
+        }
     }
 
     /// Run all stages in order, accumulating results under `context["pipe"][stage_name]`.
@@ -151,17 +159,14 @@ pub fn build_pipeline(
             let mut trusted: Vec<bool> = Vec::with_capacity(arr.len());
             for (i, stage_def) in arr.iter().enumerate() {
                 if is_parallel_stage(stage_def) {
-                    let parallel =
-                        build_parallel_stage(stage_def, registry, &sensitive_fields)
-                            .map_err(|e| {
-                                anyhow::anyhow!("invalid parallel stage at index {i}: {e}")
-                            })?;
+                    let parallel = build_parallel_stage(stage_def, registry, &sensitive_fields)
+                        .map_err(|e| anyhow::anyhow!("invalid parallel stage at index {i}: {e}"))?;
                     stages.push(Box::new(parallel));
                     trusted.push(true); // structural stage, always trusted
                 } else {
-                    let built = registry.build_stage(stage_def).map_err(|e| {
-                        anyhow::anyhow!("invalid stage config at index {i}: {e}")
-                    })?;
+                    let built = registry
+                        .build_stage(stage_def)
+                        .map_err(|e| anyhow::anyhow!("invalid stage config at index {i}: {e}"))?;
                     stages.push(built.stage);
                     trusted.push(built.trusted);
                 }
@@ -175,8 +180,7 @@ pub fn build_pipeline(
 
 /// Check whether a stage definition describes a parallel stage.
 fn is_parallel_stage(def: &Value) -> bool {
-    def.get("type").and_then(|v| v.as_str()) == Some("parallel")
-        || def.get("branches").is_some()
+    def.get("type").and_then(|v| v.as_str()) == Some("parallel") || def.get("branches").is_some()
 }
 
 /// Build a [`ParallelStage`] from a JSON definition.
@@ -215,9 +219,9 @@ fn build_parallel_stage(
             );
         }
 
-        let branch_stages = branch_def.as_array().ok_or_else(|| {
-            anyhow::anyhow!("branch '{branch_name}' must be an array of stages")
-        })?;
+        let branch_stages = branch_def
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("branch '{branch_name}' must be an array of stages"))?;
 
         let pipeline = build_pipeline(
             &Value::Array(branch_stages.clone()),
@@ -271,9 +275,7 @@ mod tests {
         // Stage 1: authenticate → returns token
         Mock::given(method("POST"))
             .and(path("/auth"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(json!({"token": "abc123"})),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"token": "abc123"})))
             .mount(&server)
             .await;
 
@@ -360,9 +362,7 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/login"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(json!({"token": "secret"})),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"token": "secret"})))
             .mount(&server)
             .await;
 
@@ -429,8 +429,7 @@ mod tests {
         ]);
 
         let registry = default_registry();
-        let pipeline =
-            build_pipeline(&pipe, &registry, vec!["password".into()]).unwrap();
+        let pipeline = build_pipeline(&pipe, &registry, vec!["password".into()]).unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let input = json!({"username": "alice", "password": "s3cret"});
         let result = pipeline.run(input, &tx).await.unwrap();
@@ -451,7 +450,9 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/data"))
-            .and(body_json(json!({"username": "alice", "password": "s3cret"})))
+            .and(body_json(
+                json!({"username": "alice", "password": "s3cret"}),
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
             .mount(&server)
             .await;
@@ -463,8 +464,7 @@ mod tests {
         });
 
         let registry = default_registry();
-        let pipeline =
-            build_pipeline(&sink, &registry, vec!["password".into()]).unwrap();
+        let pipeline = build_pipeline(&sink, &registry, vec!["password".into()]).unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let input = json!({"username": "alice", "password": "s3cret"});
         let result = pipeline.run(input, &tx).await.unwrap();
@@ -563,12 +563,14 @@ mod tests {
                         assert!(
                             val.starts_with("<<NB:") && val.ends_with(">>"),
                             "[{}] {}.{field} expected placeholder, got: {val}",
-                            case.name, stage_expect.stage_name,
+                            case.name,
+                            stage_expect.stage_name,
                         );
                         assert!(
                             !val.contains("s3cret") && !val.contains("key999"),
                             "[{}] {}.{field} placeholder contains real secret: {val}",
-                            case.name, stage_expect.stage_name,
+                            case.name,
+                            stage_expect.stage_name,
                         );
                     }
                     Expect::Redacted => {
@@ -580,10 +582,11 @@ mod tests {
                     }
                     Expect::Absent => {
                         assert!(
-                            stage_output.get(field).is_none()
-                                || stage_output[field].is_null(),
+                            stage_output.get(field).is_none() || stage_output[field].is_null(),
                             "[{}] {}.{field} should be absent, got: {}",
-                            case.name, stage_expect.stage_name, stage_output[field],
+                            case.name,
+                            stage_expect.stage_name,
+                            stage_output[field],
                         );
                     }
                 }
@@ -628,9 +631,7 @@ mod tests {
             }]),
             expects: vec![StageExpect {
                 stage_name: "extract",
-                fields: vec![
-                    ("got_token", Expect::Redacted),
-                ],
+                fields: vec![("got_token", Expect::Redacted)],
             }],
         })
         .await;
@@ -648,9 +649,7 @@ mod tests {
             }]),
             expects: vec![StageExpect {
                 stage_name: "echo",
-                fields: vec![
-                    ("password", Expect::Exact(json!("s3cret"))),
-                ],
+                fields: vec![("password", Expect::Exact(json!("s3cret")))],
             }],
         })
         .await;
@@ -855,7 +854,10 @@ mod tests {
         assert!(!password_val.contains("hunter2"));
 
         // Process CAN see inter-stage results (they're in pipe.* context, not sensitive)
-        assert!(deploy_output.get("pipe").is_some(), "process should see pipe context");
+        assert!(
+            deploy_output.get("pipe").is_some(),
+            "process should see pipe context"
+        );
 
         // ── Verify: redaction for agent response ─────────────────────────
         // server.rs calls redact_sensitive on the form data before returning

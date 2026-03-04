@@ -87,7 +87,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn make_events() -> (mpsc::UnboundedSender<PipeEvent>, mpsc::UnboundedReceiver<PipeEvent>) {
+    fn make_events() -> (
+        mpsc::UnboundedSender<PipeEvent>,
+        mpsc::UnboundedReceiver<PipeEvent>,
+    ) {
         mpsc::unbounded_channel()
     }
 

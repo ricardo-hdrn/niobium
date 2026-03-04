@@ -195,10 +195,7 @@ mod tests {
         let registry = default_registry();
         let pipeline = build_pipeline(&pipe, &registry, vec![]).unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
-        let result = pipeline
-            .run(json!({"data": "test123"}), &tx)
-            .await
-            .unwrap();
+        let result = pipeline.run(json!({"data": "test123"}), &tx).await.unwrap();
 
         assert_eq!(result["combine"]["a_val"], "test123");
         assert_eq!(result["combine"]["b_val"], "test123");
@@ -224,8 +221,7 @@ mod tests {
         ]);
 
         let registry = default_registry();
-        let pipeline =
-            build_pipeline(&pipe, &registry, vec!["password".into()]).unwrap();
+        let pipeline = build_pipeline(&pipe, &registry, vec!["password".into()]).unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let result = pipeline
             .run(json!({"user": "alice", "password": "s3cret"}), &tx)

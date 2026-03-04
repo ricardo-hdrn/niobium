@@ -13,21 +13,11 @@ pub enum Severity {
 #[derive(Debug, Clone)]
 pub enum PipeEvent {
     /// Display a toast notification to the user.
-    Toast {
-        message: String,
-        severity: Severity,
-    },
+    Toast { message: String, severity: Severity },
     /// A pipeline stage has started executing.
-    StageStarted {
-        name: String,
-    },
+    StageStarted { name: String },
     /// A pipeline stage completed successfully.
-    StageCompleted {
-        name: String,
-    },
+    StageCompleted { name: String },
     /// A pipeline stage failed.
-    StageFailed {
-        name: String,
-        error: String,
-    },
+    StageFailed { name: String, error: String },
 }

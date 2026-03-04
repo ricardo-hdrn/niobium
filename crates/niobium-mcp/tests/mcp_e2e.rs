@@ -8,7 +8,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Path to the compiled binary (built by `cargo test`).
 fn binary_path() -> std::path::PathBuf {
@@ -52,9 +52,7 @@ fn run_mcp_session(messages: &[Value]) -> Vec<Value> {
     std::thread::sleep(Duration::from_secs(2));
     drop(child.stdin.take());
 
-    let output = child
-        .wait_with_output()
-        .expect("failed to read stdout");
+    let output = child.wait_with_output().expect("failed to read stdout");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -123,36 +121,42 @@ fn test_initialize_handshake() {
     assert_eq!(resp["id"], 1);
     assert_eq!(resp["result"]["protocolVersion"], "2024-11-05");
     assert!(resp["result"]["capabilities"]["tools"].is_object());
-    assert!(resp["result"]["instructions"]
-        .as_str()
-        .unwrap()
-        .contains("Niobium"));
+    assert!(
+        resp["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("Niobium")
+    );
 }
 
 #[test]
 fn test_tools_list_returns_all_tools() {
-    let responses = run_mcp_session(&[
-        init_message(),
-        initialized_notification(),
-        tools_list(2),
-    ]);
+    let responses = run_mcp_session(&[init_message(), initialized_notification(), tools_list(2)]);
 
     // Find the tools/list response (id=2)
-    let tools_resp = responses.iter().find(|r| r["id"] == 2).expect("missing tools/list response");
-
-    let tools = tools_resp["result"]["tools"].as_array().expect("tools should be array");
-
-    let tool_names: Vec<&str> = tools
+    let tools_resp = responses
         .iter()
-        .map(|t| t["name"].as_str().unwrap())
-        .collect();
+        .find(|r| r["id"] == 2)
+        .expect("missing tools/list response");
+
+    let tools = tools_resp["result"]["tools"]
+        .as_array()
+        .expect("tools should be array");
+
+    let tool_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
     assert!(tool_names.contains(&"show_form"), "missing show_form");
-    assert!(tool_names.contains(&"show_confirmation"), "missing show_confirmation");
+    assert!(
+        tool_names.contains(&"show_confirmation"),
+        "missing show_confirmation"
+    );
     assert!(tool_names.contains(&"show_output"), "missing show_output");
     assert!(tool_names.contains(&"save_form"), "missing save_form");
     assert!(tool_names.contains(&"list_forms"), "missing list_forms");
-    assert!(tool_names.contains(&"show_saved_form"), "missing show_saved_form");
+    assert!(
+        tool_names.contains(&"show_saved_form"),
+        "missing show_saved_form"
+    );
     assert_eq!(tool_names.len(), 6, "expected exactly 6 tools");
 }
 
@@ -170,23 +174,33 @@ fn test_save_and_list_forms() {
     let responses = run_mcp_session(&[
         init_message(),
         initialized_notification(),
-        tool_call(2, "save_form", json!({
-            "name": "contact",
-            "schema": schema,
-            "description": "Contact information form"
-        })),
+        tool_call(
+            2,
+            "save_form",
+            json!({
+                "name": "contact",
+                "schema": schema,
+                "description": "Contact information form"
+            }),
+        ),
         tool_call(3, "list_forms", json!({})),
     ]);
 
     // Find save_form response
-    let save_resp = responses.iter().find(|r| r["id"] == 2).expect("missing save_form response");
+    let save_resp = responses
+        .iter()
+        .find(|r| r["id"] == 2)
+        .expect("missing save_form response");
     let save_text = extract_tool_text(save_resp);
     let save_data: Value = serde_json::from_str(&save_text).unwrap();
     assert_eq!(save_data["name"], "contact");
     assert_eq!(save_data["version"], 1);
 
     // Find list_forms response
-    let list_resp = responses.iter().find(|r| r["id"] == 3).expect("missing list_forms response");
+    let list_resp = responses
+        .iter()
+        .find(|r| r["id"] == 3)
+        .expect("missing list_forms response");
     let list_text = extract_tool_text(list_resp);
     let list_data: Value = serde_json::from_str(&list_text).unwrap();
     let forms = list_data.as_array().expect("list should be array");
@@ -197,20 +211,27 @@ fn test_save_and_list_forms() {
 
 #[test]
 fn test_save_form_auto_versions() {
-
     let responses = run_mcp_session(&[
         init_message(),
         initialized_notification(),
-        tool_call(2, "save_form", json!({
-            "name": "survey",
-            "schema": { "type": "object", "properties": { "q1": { "type": "string" } } },
-            "description": "v1"
-        })),
-        tool_call(3, "save_form", json!({
-            "name": "survey",
-            "schema": { "type": "object", "properties": { "q1": { "type": "string" }, "q2": { "type": "string" } } },
-            "description": "v2 with extra question"
-        })),
+        tool_call(
+            2,
+            "save_form",
+            json!({
+                "name": "survey",
+                "schema": { "type": "object", "properties": { "q1": { "type": "string" } } },
+                "description": "v1"
+            }),
+        ),
+        tool_call(
+            3,
+            "save_form",
+            json!({
+                "name": "survey",
+                "schema": { "type": "object", "properties": { "q1": { "type": "string" }, "q2": { "type": "string" } } },
+                "description": "v2 with extra question"
+            }),
+        ),
         tool_call(4, "list_forms", json!({})),
     ]);
 
@@ -235,14 +256,16 @@ fn test_save_form_auto_versions() {
 
 #[test]
 fn test_list_forms_empty() {
-
     let responses = run_mcp_session(&[
         init_message(),
         initialized_notification(),
         tool_call(2, "list_forms", json!({})),
     ]);
 
-    let resp = responses.iter().find(|r| r["id"] == 2).expect("missing list_forms response");
+    let resp = responses
+        .iter()
+        .find(|r| r["id"] == 2)
+        .expect("missing list_forms response");
     let text = extract_tool_text(resp);
     let data: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(data.as_array().unwrap().len(), 0);
@@ -253,12 +276,19 @@ fn test_show_form_rejects_non_object_schema() {
     let responses = run_mcp_session(&[
         init_message(),
         initialized_notification(),
-        tool_call(2, "show_form", json!({
-            "schema": "not an object"
-        })),
+        tool_call(
+            2,
+            "show_form",
+            json!({
+                "schema": "not an object"
+            }),
+        ),
     ]);
 
-    let resp = responses.iter().find(|r| r["id"] == 2).expect("missing show_form response");
+    let resp = responses
+        .iter()
+        .find(|r| r["id"] == 2)
+        .expect("missing show_form response");
     // Should be an error
     assert!(
         resp.get("error").is_some(),

@@ -21,16 +21,20 @@ use crate::schema_store::SchemaStore;
 use crate::server::NiobiumServer;
 
 /// Callback type for showing a form. Receives JSON string, returns JSON string.
-pub type ShowFormFn = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = Option<String>> + Send>> + Send + Sync>;
+pub type ShowFormFn =
+    Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = Option<String>> + Send>> + Send + Sync>;
 
 /// Callback type for showing a confirmation. Receives JSON string, returns bool.
-pub type ShowConfirmFn = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
+pub type ShowConfirmFn =
+    Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
 
 /// Callback type for showing a toast notification. Receives JSON string (fire-and-forget).
-pub type ShowToastFn = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+pub type ShowToastFn =
+    Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 /// Callback type for showing rich output. Receives JSON string, returns bool (dismissed).
-pub type ShowOutputFn = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
+pub type ShowOutputFn =
+    Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
 
 /// FFI bridge plugin that calls Dart functions directly instead of HTTP.
 struct FfiBridgePlugin {

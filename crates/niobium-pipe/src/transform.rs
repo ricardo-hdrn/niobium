@@ -36,9 +36,9 @@ fn resolve_path<'a>(path: &str, context: &'a Value) -> Result<&'a Value> {
     let path = path.strip_prefix("$.").unwrap_or(path);
     let mut current = context;
     for segment in path.split('.') {
-        current = current
-            .get(segment)
-            .ok_or_else(|| anyhow::anyhow!("transform path '$.{path}': key '{segment}' not found"))?;
+        current = current.get(segment).ok_or_else(|| {
+            anyhow::anyhow!("transform path '$.{path}': key '{segment}' not found")
+        })?;
     }
     Ok(current)
 }
@@ -58,10 +58,7 @@ impl Stage for TransformStage {
 
         let expr_map = match &self.config.expr {
             Value::Object(map) => map,
-            _ => bail!(
-                "stage '{}': expr must be a JSON object",
-                self.config.name
-            ),
+            _ => bail!("stage '{}': expr must be a JSON object", self.config.name),
         };
 
         let mut output = serde_json::Map::with_capacity(expr_map.len());
@@ -101,7 +98,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn make_events() -> (mpsc::UnboundedSender<PipeEvent>, mpsc::UnboundedReceiver<PipeEvent>) {
+    fn make_events() -> (
+        mpsc::UnboundedSender<PipeEvent>,
+        mpsc::UnboundedReceiver<PipeEvent>,
+    ) {
         mpsc::unbounded_channel()
     }
 
@@ -176,14 +176,14 @@ mod tests {
         let (tx, _rx) = make_events();
         let input = json!({
             "str_val": "hello",
-            "num_val": 3.14,
+            "num_val": 3.15,
             "bool_val": true,
             "arr_val": [1, 2, 3]
         });
 
         let result = stage.execute(input, &tx).await.unwrap();
         assert_eq!(result["s"], "hello");
-        assert_eq!(result["n"], 3.14);
+        assert_eq!(result["n"], 3.15);
         assert_eq!(result["b"], true);
         assert_eq!(result["a"], json!([1, 2, 3]));
     }
