@@ -109,6 +109,53 @@ fn extract_tool_text(response: &Value) -> String {
         .to_string()
 }
 
+/// Like run_mcp_session but accepts extra args and env vars for the binary.
+fn run_mcp_session_with(
+    messages: &[Value],
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> Vec<Value> {
+    let binary = binary_path();
+
+    let data_dir = tempfile::tempdir().expect("failed to create temp dir");
+
+    let mut cmd = Command::new(&binary);
+    cmd.args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .env("NIOBIUM_DATA_DIR", data_dir.path());
+
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+
+    let mut child = cmd
+        .spawn()
+        .unwrap_or_else(|e| panic!("failed to start {}: {e}", binary.display()));
+
+    let stdin = child.stdin.as_mut().expect("failed to open stdin");
+
+    for msg in messages {
+        let line = serde_json::to_string(msg).unwrap();
+        writeln!(stdin, "{line}").expect("failed to write to stdin");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+
+    std::thread::sleep(Duration::from_secs(2));
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().expect("failed to read stdout");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    stdout
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────
 
 #[test]
@@ -294,4 +341,70 @@ fn test_show_form_rejects_non_object_schema() {
         resp.get("error").is_some(),
         "should return error for non-object schema, got: {resp}"
     );
+}
+
+#[test]
+fn test_headless_flag() {
+    let responses = run_mcp_session_with(
+        &[init_message(), initialized_notification(), tools_list(2)],
+        &["serve", "--headless"],
+        &[],
+    );
+
+    let tools_resp = responses
+        .iter()
+        .find(|r| r["id"] == 2)
+        .expect("missing tools/list response in --headless mode");
+
+    let tools = tools_resp["result"]["tools"]
+        .as_array()
+        .expect("tools should be array");
+    assert_eq!(tools.len(), 6);
+}
+
+#[test]
+fn test_headless_env_var() {
+    let responses = run_mcp_session_with(
+        &[init_message(), initialized_notification(), tools_list(2)],
+        &["serve"],
+        &[("NIOBIUM_HEADLESS", "true")],
+    );
+
+    let tools_resp = responses
+        .iter()
+        .find(|r| r["id"] == 2)
+        .expect("missing tools/list response with NIOBIUM_HEADLESS=1");
+
+    let tools = tools_resp["result"]["tools"]
+        .as_array()
+        .expect("tools should be array");
+    assert_eq!(tools.len(), 6);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_broken_flutter_binary_falls_back_to_headless() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Create a fake Flutter binary that crashes immediately
+    let tmp = tempfile::tempdir().expect("failed to create temp dir");
+    let fake_bin = tmp.path().join("niobium_app");
+    std::fs::write(&fake_bin, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(&fake_bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let responses = run_mcp_session_with(
+        &[init_message(), initialized_notification(), tools_list(2)],
+        &["serve"],
+        &[("NIOBIUM_FLUTTER_BIN", fake_bin.to_str().unwrap())],
+    );
+
+    let tools_resp = responses
+        .iter()
+        .find(|r| r["id"] == 2)
+        .expect("broken Flutter binary should fall back to headless — no MCP response received");
+
+    let tools = tools_resp["result"]["tools"]
+        .as_array()
+        .expect("tools should be array");
+    assert_eq!(tools.len(), 6, "headless fallback should expose all 6 tools");
 }
