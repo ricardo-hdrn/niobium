@@ -12,9 +12,11 @@ import 'package:window_manager/window_manager.dart';
 import 'src/rust/api.dart' as rust_api;
 import 'src/rust/frb_generated.dart';
 import 'models/display_config.dart';
+import 'models/pill.dart';
 import 'widgets/dynamic_form.dart';
 import 'widgets/confirmation_dialog.dart';
 import 'widgets/output_display.dart';
+import 'widgets/pills_view.dart';
 import 'theme/niobium_theme.dart';
 
 void main() async {
@@ -58,6 +60,10 @@ class _NiobiumAppState extends State<NiobiumApp> with WindowListener {
   // Current UI to display — null means idle (hidden)
   Widget? _currentView;
 
+  // Pill feed — newest first, bounded
+  final List<Pill> _pills = [];
+  bool _pillsVisible = false;
+
   @override
   void initState() {
     super.initState();
@@ -82,6 +88,7 @@ class _NiobiumAppState extends State<NiobiumApp> with WindowListener {
       showConfirm: _handleShowConfirmFfi,
       showToast: _handleShowToastFfi,
       showOutput: _handleShowOutputFfi,
+      onPill: _handlePillFfi,
     ).then((_) {
       // MCP server exited (stdin closed) — shut down the app
       exit(0);
@@ -135,6 +142,105 @@ class _NiobiumAppState extends State<NiobiumApp> with WindowListener {
     return _handleShowOutput(content, outputType, title, display: display);
   }
 
+  /// FFI callback: a source plugin pushed a pill.
+  /// Receives JSON payload (fire-and-forget).
+  Future<void> _handlePillFfi(String payload) async {
+    try {
+      final json = jsonDecode(payload) as Map<String, dynamic>;
+      final event = Pill.fromJson(json);
+
+      _pills.insert(0, event);
+      if (_pills.length > maxPillCount) {
+        _pills.removeRange(maxPillCount, _pills.length);
+      }
+
+      if (_pillsVisible) {
+        // Rebuild pills view with updated events
+        setState(() {
+          _currentView = PillsView(
+            events: _pills,
+            onClose: _hidePills,
+          );
+        });
+      } else if (_currentView == null) {
+        // Auto-show pills view on first event if nothing else is visible
+        _showPills();
+      }
+    } catch (e) {
+      // Ignore malformed hub events
+    }
+  }
+
+  void _showPills() async {
+    _pillsVisible = true;
+    setState(() {
+      _currentView = PillsView(
+        events: _pills,
+        onClose: _hidePills,
+        onPillTap: _handlePillTap,
+      );
+    });
+    await windowManager.setSize(const Size(420, 720));
+    await windowManager.center();
+    await _showWindow();
+  }
+
+  void _handlePillTap(Pill event) async {
+    if (event.isAnswered) return;
+
+    String? result;
+
+    switch (event.outputType) {
+      case 'decision':
+        final confirmed = await _handleShowConfirmation(
+          event.summary,
+          'Decision',
+        );
+        // For decisions with options, we need a different approach
+        // For now, treat confirmation as yes/no
+        if (event.options != null && event.options!.isNotEmpty) {
+          // TODO: decision UI with N options
+          result = confirmed ? event.options!.first : null;
+        } else {
+          result = confirmed ? 'yes' : null;
+        }
+      case 'table' || 'datatable' || 'markdown' || 'json' || 'diff' || 'text':
+        await _handleShowOutput(
+          event.summary,
+          event.outputType!,
+          event.sourceKind ?? 'Output',
+        );
+        return; // read-only, no response to sink
+      default:
+        return;
+    }
+
+    if (result == null) return;
+
+    // Mark answered + refresh pills
+    event.response = result;
+    _showPills();
+
+    // Sink to remote
+    if (event.hasRemoteSink) {
+      try {
+        await rust_api.sinkToRemote(
+          url: event.responseUrl!,
+          payload: jsonEncode({'choice': result}),
+        );
+      } catch (e) {
+        _handleShowToast('Failed to send response: $e', 'error');
+      }
+    }
+  }
+
+  void _hidePills() async {
+    _pillsVisible = false;
+    setState(() => _currentView = null);
+    await _hideWindow();
+    await windowManager.setSize(const Size(580, 720));
+  }
+
   // ── Request handlers ─────────────────────────────────────────────────
 
   Future<void> _showWindow() async {
@@ -147,6 +253,18 @@ class _NiobiumAppState extends State<NiobiumApp> with WindowListener {
     // Drop always-on-top only when hiding, so the form stays on top while visible.
     await windowManager.setAlwaysOnTop(false);
     await windowManager.hide();
+  }
+
+  /// After a popup (form/confirmation/output) closes, return to pills view
+  /// if hub events exist, otherwise hide the window.
+  Future<void> _returnFromPopup() async {
+    if (_pills.isNotEmpty) {
+      _showPills();
+    } else {
+      setState(() => _currentView = null);
+      await _hideWindow();
+      await windowManager.setSize(const Size(580, 720));
+    }
   }
 
   Future<Map<String, dynamic>?> _handleShowForm(
@@ -178,9 +296,7 @@ class _NiobiumAppState extends State<NiobiumApp> with WindowListener {
     await _showWindow();
     final result = await completer.future;
 
-    setState(() => _currentView = null);
-    await _hideWindow();
-    await windowManager.setSize(const Size(580, 720));
+    await _returnFromPopup();
 
     return result;
   }
@@ -209,9 +325,7 @@ class _NiobiumAppState extends State<NiobiumApp> with WindowListener {
     await _showWindow();
     final result = await completer.future;
 
-    setState(() => _currentView = null);
-    await _hideWindow();
-    await windowManager.setSize(const Size(580, 720));
+    await _returnFromPopup();
 
     return result;
   }
@@ -309,9 +423,7 @@ class _NiobiumAppState extends State<NiobiumApp> with WindowListener {
     await _showWindow();
     final result = await completer.future;
 
-    setState(() => _currentView = null);
-    await _hideWindow();
-    await windowManager.setSize(const Size(580, 720));
+    await _returnFromPopup();
 
     return result;
   }

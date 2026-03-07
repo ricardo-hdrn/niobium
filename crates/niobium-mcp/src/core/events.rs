@@ -64,70 +64,52 @@ pub enum Event {
     /// A pipeline event (toast, stage progress) for UI forwarding.
     PipeEvent(niobium_pipe::PipeEvent),
 
-    // ── Hub events (WebSocket → UI) ─────────────────────────────────────
-    /// A real-time event from the mcp-discuss hub.
-    HubEvent(HubEvent),
-
-    /// Hub connection state changed.
-    HubConnectionState(HubConnectionState),
+    // ── Pill SPI ────────────────────────────────────────────────────────
+    /// A pill pushed into the feed by any source plugin.
+    Pill(Pill),
 
     // ── Lifecycle ────────────────────────────────────────────────────────
     /// The runtime is shutting down.
     Shutdown,
 }
 
-/// Event types pushed by the mcp-discuss hub over WebSocket.
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(tag = "type", content = "data")]
-pub enum HubEvent {
-    /// New update event on a subject feed.
-    #[serde(rename = "update_event")]
-    UpdateEvent {
-        subject_id: String,
-        event_id: i64,
-        source_kind: String,
-        source_id: String,
-        summary: String,
-        payload_ref: Option<String>,
-        created_at: String,
-    },
-
-    /// New progress update on an actionable.
-    #[serde(rename = "actionable_update")]
-    ActionableUpdate {
-        subject_id: String,
-        actionable_id: String,
-        update_id: i64,
-        source_kind: String,
-        source_id: String,
-        summary: String,
-        created_at: String,
-    },
-
-    /// Actionable state changed (proposed → dispatched → done, etc.)
-    #[serde(rename = "actionable_state")]
-    ActionableState {
-        subject_id: String,
-        actionable_id: String,
-        old_state: String,
-        new_state: String,
-    },
-
-    /// Subject status changed (open → paused → closed).
-    #[serde(rename = "subject_status")]
-    SubjectStatus {
-        subject_id: String,
-        old_status: String,
-        new_status: String,
-    },
+/// A pill — generic unit in the activity feed.
+///
+/// Any plugin can produce pills (hub WS client, voice, local watchers, etc.).
+/// Niobium renders them in the feed and routes taps to the appropriate component.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Pill {
+    /// Source plugin identifier (e.g. "hub", "voice", "watcher").
+    pub source: String,
+    /// Human-readable summary.
+    pub summary: String,
+    /// When this pill was created (ISO 8601).
+    #[serde(default = "default_timestamp")]
+    pub created_at: String,
+    /// Output type hint for rendering ("decision", "form", "markdown", "table", etc.).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_type: Option<String>,
+    /// Decision options (when output_type = "decision").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<String>>,
+    /// Rich content (form schema, table data, markdown text, etc.).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<Value>,
+    /// URL to sink the user's response to (remote routing).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_url: Option<String>,
+    /// Source-specific metadata (IDs, refs, etc.).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Value>,
 }
 
-/// Hub WebSocket connection state.
-#[derive(Debug, Clone)]
-pub enum HubConnectionState {
-    Connected,
-    Disconnected,
-    Reconnecting { attempt: u32 },
+fn default_timestamp() -> String {
+    chrono_now()
+}
+
+fn chrono_now() -> String {
+    // Simple ISO 8601 without chrono dep — good enough for display
+    String::new()
 }
 
 impl Event {
@@ -142,8 +124,7 @@ impl Event {
             | Event::Confirmed { request_id, .. }
             | Event::OutputDismissed { request_id } => Some(*request_id),
             Event::PipeEvent(_)
-            | Event::HubEvent(_)
-            | Event::HubConnectionState(_)
+            | Event::Pill(_)
             | Event::Shutdown => None,
         }
     }

@@ -6,7 +6,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use serde_json::Value;
 use tracing::info;
@@ -17,8 +17,12 @@ use crate::config::Config;
 use crate::core::event_bus::EventBus;
 use crate::core::events::Event;
 use crate::core::plugin::Plugin;
+use crate::plugins::hub_client::HubConfig;
 use crate::schema_store::SchemaStore;
 use crate::server::NiobiumServer;
+
+/// Global hub config for remote sink calls.
+static GLOBAL_HUB_CONFIG: OnceLock<HubConfig> = OnceLock::new();
 
 /// Callback type for showing a form. Receives JSON string, returns JSON string.
 pub type ShowFormFn =
@@ -36,8 +40,8 @@ pub type ShowToastFn =
 pub type ShowOutputFn =
     Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
 
-/// Callback type for hub events. Receives JSON string (fire-and-forget).
-pub type OnHubEventFn =
+/// Callback type for pill events. Receives JSON string (fire-and-forget).
+pub type OnPillFn =
     Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 /// FFI bridge plugin that calls Dart functions directly instead of HTTP.
@@ -46,7 +50,7 @@ struct FfiBridgePlugin {
     show_confirm: ShowConfirmFn,
     show_toast: ShowToastFn,
     show_output: ShowOutputFn,
-    on_hub_event: OnHubEventFn,
+    on_pill: OnPillFn,
 }
 
 #[async_trait::async_trait]
@@ -179,9 +183,9 @@ impl Plugin for FfiBridgePlugin {
                     bus.emit(Event::OutputDismissed { request_id });
                 }
 
-                Ok(Event::HubEvent(hub_event)) => {
-                    if let Ok(json) = serde_json::to_string(&hub_event) {
-                        (self.on_hub_event)(json).await;
+                Ok(Event::Pill(pill)) => {
+                    if let Ok(json) = serde_json::to_string(&pill) {
+                        (self.on_pill)(json).await;
                     }
                 }
 
@@ -213,7 +217,7 @@ pub async fn start_mcp_server_ffi(
     show_confirm: ShowConfirmFn,
     show_toast: ShowToastFn,
     show_output: ShowOutputFn,
-    on_hub_event: OnHubEventFn,
+    on_pill: OnPillFn,
 ) -> anyhow::Result<()> {
     let config = Config::load();
 
@@ -229,7 +233,7 @@ pub async fn start_mcp_server_ffi(
         show_confirm,
         show_toast,
         show_output,
-        on_hub_event,
+        on_pill,
     };
     let ffi_bus = bus.clone();
     tokio::spawn(async move {
@@ -239,7 +243,9 @@ pub async fn start_mcp_server_ffi(
     });
 
     // Plugin: Hub WebSocket client (if configured)
-    if let Some(hub_config) = crate::plugins::hub_client::HubConfig::from_env() {
+    if let Some(hub_config) = HubConfig::from_env() {
+        let _ = GLOBAL_HUB_CONFIG.set(hub_config.clone());
+
         let hub_plugin = crate::plugins::hub_client::HubClientPlugin::new(hub_config);
         let hub_bus = bus.clone();
         tokio::spawn(async move {
@@ -270,6 +276,34 @@ pub async fn start_mcp_server_ffi(
     Ok(())
 }
 
+/// Sink a user response to a remote URL using hub auth.
+///
+/// Called from Dart after the user responds to a hub event (decision, form, etc.).
+/// POSTs the JSON payload to the given URL with the hub's Bearer token.
+pub async fn sink_to_remote(url: String, payload: String) -> anyhow::Result<()> {
+    let hub_config = GLOBAL_HUB_CONFIG
+        .get()
+        .ok_or_else(|| anyhow::anyhow!("hub not configured — cannot sink to remote"))?;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", hub_config.api_key))
+        .header("Content-Type", "application/json")
+        .body(payload)
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("remote sink returned {status}: {body}");
+    }
+
+    info!(url, "remote sink: posted response");
+    Ok(())
+}
+
 /// Start the MCP server in headless mode (no UI — forms always cancel).
 ///
 /// Used by the standalone binary when no Flutter app is available,
@@ -279,14 +313,14 @@ pub async fn start_mcp_server_headless() -> anyhow::Result<()> {
     let show_confirm: ShowConfirmFn = Arc::new(|_| Box::pin(async { false }));
     let show_toast: ShowToastFn = Arc::new(|_| Box::pin(async {}));
     let show_output: ShowOutputFn = Arc::new(|_| Box::pin(async { true }));
-    let on_hub_event: OnHubEventFn = Arc::new(|_| Box::pin(async {}));
+    let on_pill: OnPillFn = Arc::new(|_| Box::pin(async {}));
 
     start_mcp_server_ffi(
         show_form,
         show_confirm,
         show_toast,
         show_output,
-        on_hub_event,
+        on_pill,
     )
     .await
 }

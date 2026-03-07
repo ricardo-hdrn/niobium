@@ -1,16 +1,17 @@
 // Hub WebSocket client plugin.
 //
 // Connects to mcp-discuss hub via WebSocket, receives real-time events,
-// and emits them on the Niobium event bus for the UI layer.
+// and converts them into generic Pill events on the Niobium event bus.
 
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use serde_json::Value;
 use tokio_tungstenite::tungstenite;
 use tracing::{error, info, warn};
 
 use crate::core::event_bus::EventBus;
-use crate::core::events::{Event, HubConnectionState, HubEvent};
+use crate::core::events::{Event, Pill};
 use crate::core::plugin::Plugin;
 
 /// Configuration for connecting to the mcp-discuss hub.
@@ -59,7 +60,6 @@ impl Plugin for HubClientPlugin {
         loop {
             match connect_and_listen(&self.config, &bus).await {
                 Ok(()) => {
-                    // Clean disconnect (shutdown signal)
                     info!("hub-client: disconnected cleanly");
                     break;
                 }
@@ -72,10 +72,6 @@ impl Plugin for HubClientPlugin {
                         delay_ms = delay.as_millis(),
                         "hub-client: connection failed: {e} — reconnecting"
                     );
-
-                    bus.emit(Event::HubConnectionState(
-                        HubConnectionState::Reconnecting { attempt },
-                    ));
 
                     tokio::select! {
                         _ = tokio::time::sleep(delay) => {}
@@ -92,10 +88,162 @@ impl Plugin for HubClientPlugin {
     }
 }
 
+// ── Hub-specific wire types (private to this plugin) ─────────────────
+
+/// Raw hub WS message — parsed then converted to Pill.
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "type", content = "data")]
+enum HubMessage {
+    #[serde(rename = "update_event")]
+    UpdateEvent {
+        subject_id: String,
+        #[allow(dead_code)]
+        event_id: i64,
+        source_kind: String,
+        source_id: String,
+        summary: String,
+        #[allow(dead_code)]
+        payload_ref: Option<String>,
+        created_at: String,
+    },
+
+    #[serde(rename = "actionable_update")]
+    ActionableUpdate {
+        subject_id: String,
+        actionable_id: String,
+        update_id: i64,
+        source_kind: String,
+        source_id: String,
+        summary: String,
+        created_at: String,
+        output_type: Option<String>,
+        options: Option<Vec<String>>,
+        response_url: Option<String>,
+        content: Option<Value>,
+    },
+
+    #[serde(rename = "actionable_state")]
+    ActionableState {
+        subject_id: String,
+        actionable_id: String,
+        old_state: String,
+        new_state: String,
+    },
+
+    #[serde(rename = "subject_status")]
+    SubjectStatus {
+        subject_id: String,
+        old_status: String,
+        new_status: String,
+    },
+}
+
+impl HubMessage {
+    fn into_pill(self) -> Pill {
+        match self {
+            HubMessage::UpdateEvent {
+                subject_id,
+                source_kind,
+                source_id,
+                summary,
+                created_at,
+                ..
+            } => Pill {
+                source: "hub".into(),
+                summary,
+                created_at,
+                output_type: None,
+                options: None,
+                content: None,
+                response_url: None,
+                meta: Some(serde_json::json!({
+                    "event_type": "update_event",
+                    "subject_id": subject_id,
+                    "source_kind": source_kind,
+                    "source_id": source_id,
+                })),
+            },
+
+            HubMessage::ActionableUpdate {
+                subject_id,
+                actionable_id,
+                update_id,
+                source_kind,
+                source_id,
+                summary,
+                created_at,
+                output_type,
+                options,
+                response_url,
+                content,
+            } => Pill {
+                source: "hub".into(),
+                summary,
+                created_at,
+                output_type,
+                options,
+                content,
+                response_url,
+                meta: Some(serde_json::json!({
+                    "event_type": "actionable_update",
+                    "subject_id": subject_id,
+                    "actionable_id": actionable_id,
+                    "update_id": update_id,
+                    "source_kind": source_kind,
+                    "source_id": source_id,
+                })),
+            },
+
+            HubMessage::ActionableState {
+                subject_id,
+                actionable_id,
+                old_state,
+                new_state,
+            } => Pill {
+                source: "hub".into(),
+                summary: format!("{old_state} → {new_state}"),
+                created_at: String::new(),
+                output_type: None,
+                options: None,
+                content: None,
+                response_url: None,
+                meta: Some(serde_json::json!({
+                    "event_type": "actionable_state",
+                    "subject_id": subject_id,
+                    "actionable_id": actionable_id,
+                    "old_state": old_state,
+                    "new_state": new_state,
+                })),
+            },
+
+            HubMessage::SubjectStatus {
+                subject_id,
+                old_status,
+                new_status,
+            } => Pill {
+                source: "hub".into(),
+                summary: format!("{old_status} → {new_status}"),
+                created_at: String::new(),
+                output_type: None,
+                options: None,
+                content: None,
+                response_url: None,
+                meta: Some(serde_json::json!({
+                    "event_type": "subject_status",
+                    "subject_id": subject_id,
+                    "old_status": old_status,
+                    "new_status": new_status,
+                })),
+            },
+        }
+    }
+}
+
+// ── Connection logic ─────────────────────────────────────────────────
+
 async fn connect_and_listen(config: &HubConfig, bus: &EventBus) -> anyhow::Result<()> {
     let ws_url = &config.url;
 
-    // Build request with auth header
     let uri: http::Uri = ws_url.parse()?;
     let host = uri.host().unwrap_or("localhost");
     let request = http::Request::builder()
@@ -114,10 +262,8 @@ async fn connect_and_listen(config: &HubConfig, bus: &EventBus) -> anyhow::Resul
     let (ws_stream, _response) = tokio_tungstenite::connect_async(request).await?;
 
     info!("hub-client: connected to {ws_url}");
-    bus.emit(Event::HubConnectionState(HubConnectionState::Connected));
 
     let (_write, mut read) = ws_stream.split();
-
     let mut shutdown_rx = bus.subscribe();
 
     loop {
@@ -125,41 +271,32 @@ async fn connect_and_listen(config: &HubConfig, bus: &EventBus) -> anyhow::Resul
             msg = read.next() => {
                 match msg {
                     Some(Ok(tungstenite::Message::Text(text))) => {
-                        match serde_json::from_str::<HubEvent>(&text) {
-                            Ok(event) => {
-                                bus.emit(Event::HubEvent(event));
+                        match serde_json::from_str::<HubMessage>(&text) {
+                            Ok(hub_msg) => {
+                                bus.emit(Event::Pill(hub_msg.into_pill()));
                             }
                             Err(e) => {
-                                warn!("hub-client: failed to parse hub event: {e}");
+                                warn!("hub-client: failed to parse message: {e}");
                             }
                         }
                     }
-                    Some(Ok(tungstenite::Message::Ping(_))) => {
-                        // tungstenite auto-responds with pong
-                    }
+                    Some(Ok(tungstenite::Message::Ping(_))) => {}
                     Some(Ok(tungstenite::Message::Close(_))) => {
                         info!("hub-client: server closed connection");
-                        bus.emit(Event::HubConnectionState(HubConnectionState::Disconnected));
                         return Err(anyhow::anyhow!("server closed connection"));
                     }
-                    Some(Ok(_)) => {
-                        // Ignore binary, pong, frame
-                    }
+                    Some(Ok(_)) => {}
                     Some(Err(e)) => {
                         error!("hub-client: WebSocket error: {e}");
-                        bus.emit(Event::HubConnectionState(HubConnectionState::Disconnected));
                         return Err(e.into());
                     }
                     None => {
-                        // Stream ended
-                        bus.emit(Event::HubConnectionState(HubConnectionState::Disconnected));
                         return Err(anyhow::anyhow!("WebSocket stream ended"));
                     }
                 }
             }
             event = shutdown_rx.recv() => {
                 if matches!(event, Ok(Event::Shutdown)) {
-                    bus.emit(Event::HubConnectionState(HubConnectionState::Disconnected));
                     return Ok(());
                 }
             }
@@ -167,25 +304,20 @@ async fn connect_and_listen(config: &HubConfig, bus: &EventBus) -> anyhow::Resul
     }
 }
 
-/// Exponential backoff with jitter, capped at MAX_BACKOFF.
 fn backoff_delay(attempt: u32) -> Duration {
     let exp = BASE_BACKOFF.saturating_mul(1 << attempt.min(6));
     let capped = exp.min(MAX_BACKOFF);
-    // Add ~25% jitter
     let jitter_ms = (capped.as_millis() as u64) / 4;
     let jitter = Duration::from_millis(fastrand_u64() % jitter_ms.max(1));
     capped + jitter
 }
 
-/// Simple u64 from getrandom (no extra dep, already in workspace).
 fn fastrand_u64() -> u64 {
     let mut buf = [0u8; 8];
-    // Best-effort; if getrandom fails, no jitter
     let _ = getrandom::fill(&mut buf);
     u64::from_le_bytes(buf)
 }
 
-/// Wait for a shutdown event on the bus.
 async fn wait_for_shutdown(bus: &EventBus) {
     let mut rx = bus.subscribe();
     loop {

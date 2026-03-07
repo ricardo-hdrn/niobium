@@ -79,11 +79,17 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiInitLogging();
 
+  Future<void> crateApiSinkToRemote({
+    required String url,
+    required String payload,
+  });
+
   Future<void> crateApiStartMcpServer({
     required FutureOr<String?> Function(String) showForm,
     required FutureOr<bool> Function(String) showConfirm,
     required FutureOr<void> Function(String) showToast,
     required FutureOr<bool> Function(String) showOutput,
+    required FutureOr<void> Function(String) onPill,
   });
 }
 
@@ -150,11 +156,47 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "init_logging", argNames: []);
 
   @override
+  Future<void> crateApiSinkToRemote({
+    required String url,
+    required String payload,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(url, serializer);
+          sse_encode_String(payload, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 4,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiSinkToRemoteConstMeta,
+        argValues: [url, payload],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSinkToRemoteConstMeta =>
+      const TaskConstMeta(
+        debugName: "sink_to_remote",
+        argNames: ["url", "payload"],
+      );
+
+  @override
   Future<void> crateApiStartMcpServer({
     required FutureOr<String?> Function(String) showForm,
     required FutureOr<bool> Function(String) showConfirm,
     required FutureOr<void> Function(String) showToast,
     required FutureOr<bool> Function(String) showOutput,
+    required FutureOr<void> Function(String) onPill,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -176,6 +218,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             showOutput,
             serializer,
           );
+          sse_encode_DartFn_Inputs_String_Output_unit_AnyhowException(
+            onPill,
+            serializer,
+          );
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -188,7 +234,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiStartMcpServerConstMeta,
-        argValues: [showForm, showConfirm, showToast, showOutput],
+        argValues: [showForm, showConfirm, showToast, showOutput, onPill],
         apiImpl: this,
       ),
     );
@@ -196,7 +242,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiStartMcpServerConstMeta => const TaskConstMeta(
     debugName: "start_mcp_server",
-    argNames: ["showForm", "showConfirm", "showToast", "showOutput"],
+    argNames: ["showForm", "showConfirm", "showToast", "showOutput", "onPill"],
   );
 
   Future<void> Function(int, dynamic)

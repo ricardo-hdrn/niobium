@@ -27,11 +27,24 @@ Future<void> startMcpServer({
   required FutureOr<bool> Function(String) showConfirm,
   required FutureOr<void> Function(String) showToast,
   required FutureOr<bool> Function(String) showOutput,
+  required FutureOr<void> Function(String) onPill,
 }) => RustLib.instance.api.crateApiStartMcpServer(
   showForm: showForm,
   showConfirm: showConfirm,
   showToast: showToast,
   showOutput: showOutput,
+  onPill: onPill,
+);
+
+/// Sink a user response to a remote URL.
+///
+/// Called after the user responds to a pill event (decision, form, etc.).
+Future<void> sinkToRemote({
+  required String url,
+  required String payload,
+}) => RustLib.instance.api.crateApiSinkToRemote(
+  url: url,
+  payload: payload,
 );
 
 /// Get the version of the Niobium MCP server.
