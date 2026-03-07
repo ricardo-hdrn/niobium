@@ -145,6 +145,9 @@ fn wire__crate__api__start_mcp_server_impl(
             let api_show_output = decode_DartFn_Inputs_String_Output_bool_AnyhowException(
                 <flutter_rust_bridge::DartOpaque>::sse_decode(&mut deserializer),
             );
+            let api_on_hub_event = decode_DartFn_Inputs_String_Output_unit_AnyhowException(
+                <flutter_rust_bridge::DartOpaque>::sse_decode(&mut deserializer),
+            );
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -154,6 +157,7 @@ fn wire__crate__api__start_mcp_server_impl(
                             api_show_confirm,
                             api_show_toast,
                             api_show_output,
+                            api_on_hub_event,
                         )
                         .await?;
                         Ok(output_ok)
