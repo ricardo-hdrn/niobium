@@ -110,11 +110,7 @@ fn extract_tool_text(response: &Value) -> String {
 }
 
 /// Like run_mcp_session but accepts extra args and env vars for the binary.
-fn run_mcp_session_with(
-    messages: &[Value],
-    args: &[&str],
-    env: &[(&str, &str)],
-) -> Vec<Value> {
+fn run_mcp_session_with(messages: &[Value], args: &[&str], env: &[(&str, &str)]) -> Vec<Value> {
     let binary = binary_path();
 
     let data_dir = tempfile::tempdir().expect("failed to create temp dir");
@@ -406,5 +402,9 @@ fn test_broken_flutter_binary_falls_back_to_headless() {
     let tools = tools_resp["result"]["tools"]
         .as_array()
         .expect("tools should be array");
-    assert_eq!(tools.len(), 6, "headless fallback should expose all 6 tools");
+    assert_eq!(
+        tools.len(),
+        6,
+        "headless fallback should expose all 6 tools"
+    );
 }

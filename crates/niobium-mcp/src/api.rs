@@ -36,12 +36,17 @@ pub type ShowToastFn =
 pub type ShowOutputFn =
     Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
 
+/// Callback type for hub events. Receives JSON string (fire-and-forget).
+pub type OnHubEventFn =
+    Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+
 /// FFI bridge plugin that calls Dart functions directly instead of HTTP.
 struct FfiBridgePlugin {
     show_form: ShowFormFn,
     show_confirm: ShowConfirmFn,
     show_toast: ShowToastFn,
     show_output: ShowOutputFn,
+    on_hub_event: OnHubEventFn,
 }
 
 #[async_trait::async_trait]
@@ -174,6 +179,12 @@ impl Plugin for FfiBridgePlugin {
                     bus.emit(Event::OutputDismissed { request_id });
                 }
 
+                Ok(Event::HubEvent(hub_event)) => {
+                    if let Ok(json) = serde_json::to_string(&hub_event) {
+                        (self.on_hub_event)(json).await;
+                    }
+                }
+
                 Ok(Event::Shutdown) => {
                     info!("ffi-bridge: shutting down");
                     break;
@@ -202,6 +213,7 @@ pub async fn start_mcp_server_ffi(
     show_confirm: ShowConfirmFn,
     show_toast: ShowToastFn,
     show_output: ShowOutputFn,
+    on_hub_event: OnHubEventFn,
 ) -> anyhow::Result<()> {
     let config = Config::load();
 
@@ -217,6 +229,7 @@ pub async fn start_mcp_server_ffi(
         show_confirm,
         show_toast,
         show_output,
+        on_hub_event,
     };
     let ffi_bus = bus.clone();
     tokio::spawn(async move {
@@ -224,6 +237,18 @@ pub async fn start_mcp_server_ffi(
             tracing::error!("ffi-bridge plugin failed: {e}");
         }
     });
+
+    // Plugin: Hub WebSocket client (if configured)
+    if let Some(hub_config) = crate::plugins::hub_client::HubConfig::from_env() {
+        let hub_plugin = crate::plugins::hub_client::HubClientPlugin::new(hub_config);
+        let hub_bus = bus.clone();
+        tokio::spawn(async move {
+            if let Err(e) = hub_plugin.start(hub_bus).await {
+                tracing::error!("hub-client plugin failed: {e}");
+            }
+        });
+        info!("hub-client plugin started (NIOBIUM_HUB_URL configured)");
+    }
 
     // Event bus router
     let router_bus = bus.clone();
@@ -254,6 +279,14 @@ pub async fn start_mcp_server_headless() -> anyhow::Result<()> {
     let show_confirm: ShowConfirmFn = Arc::new(|_| Box::pin(async { false }));
     let show_toast: ShowToastFn = Arc::new(|_| Box::pin(async {}));
     let show_output: ShowOutputFn = Arc::new(|_| Box::pin(async { true }));
+    let on_hub_event: OnHubEventFn = Arc::new(|_| Box::pin(async {}));
 
-    start_mcp_server_ffi(show_form, show_confirm, show_toast, show_output).await
+    start_mcp_server_ffi(
+        show_form,
+        show_confirm,
+        show_toast,
+        show_output,
+        on_hub_event,
+    )
+    .await
 }

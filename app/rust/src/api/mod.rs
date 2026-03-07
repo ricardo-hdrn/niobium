@@ -36,6 +36,7 @@ pub async fn start_mcp_server(
     show_confirm: impl Fn(String) -> DartFnFuture<bool> + Send + Sync + 'static,
     show_toast: impl Fn(String) -> DartFnFuture<()> + Send + Sync + 'static,
     show_output: impl Fn(String) -> DartFnFuture<bool> + Send + Sync + 'static,
+    on_hub_event: impl Fn(String) -> DartFnFuture<()> + Send + Sync + 'static,
 ) -> anyhow::Result<()> {
     let show_form: niobium_mcp::api::ShowFormFn = Arc::new(move |payload: String| {
         Box::pin(show_form(payload)) as Pin<Box<dyn Future<Output = Option<String>> + Send>>
@@ -53,7 +54,18 @@ pub async fn start_mcp_server(
         Box::pin(show_output(payload)) as Pin<Box<dyn Future<Output = bool> + Send>>
     });
 
-    niobium_mcp::api::start_mcp_server_ffi(show_form, show_confirm, show_toast, show_output).await
+    let on_hub_event: niobium_mcp::api::OnHubEventFn = Arc::new(move |payload: String| {
+        Box::pin(on_hub_event(payload)) as Pin<Box<dyn Future<Output = ()> + Send>>
+    });
+
+    niobium_mcp::api::start_mcp_server_ffi(
+        show_form,
+        show_confirm,
+        show_toast,
+        show_output,
+        on_hub_event,
+    )
+    .await
 }
 
 /// Get the version of the Niobium MCP server.

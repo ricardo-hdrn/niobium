@@ -1,1 +1,1 @@
-// Future: WASM-sandboxed plugin modules
+pub mod hub_client;
