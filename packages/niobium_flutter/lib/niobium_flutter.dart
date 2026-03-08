@@ -12,6 +12,7 @@ export 'theme/niobium_theme.dart';
 // Models
 export 'models/form_schema.dart';
 export 'models/display_config.dart';
+export 'models/pill.dart';
 
 // Utils
 export 'utils/schema_parser.dart';
@@ -22,3 +23,4 @@ export 'utils/remote_data.dart';
 export 'widgets/dynamic_form.dart';
 export 'widgets/confirmation_dialog.dart';
 export 'widgets/output_display.dart';
+export 'widgets/pills_view.dart';
