@@ -1,1 +1,1 @@
-pub mod hub_client;
+// Plugins directory — add new plugins here.

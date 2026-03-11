@@ -68,13 +68,6 @@ pub async fn start_mcp_server(
     .await
 }
 
-/// Sink a user response to a remote URL.
-///
-/// Called after the user responds to a pill event (decision, form, etc.).
-pub async fn sink_to_remote(url: String, payload: String) -> anyhow::Result<()> {
-    niobium_mcp::api::sink_to_remote(url, payload).await
-}
-
 /// Get the version of the Niobium MCP server.
 pub fn get_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()

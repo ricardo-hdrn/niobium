@@ -79,11 +79,6 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiInitLogging();
 
-  Future<void> crateApiSinkToRemote({
-    required String url,
-    required String payload,
-  });
-
   Future<void> crateApiStartMcpServer({
     required FutureOr<String?> Function(String) showForm,
     required FutureOr<bool> Function(String) showConfirm,
@@ -154,41 +149,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiInitLoggingConstMeta =>
       const TaskConstMeta(debugName: "init_logging", argNames: []);
-
-  @override
-  Future<void> crateApiSinkToRemote({
-    required String url,
-    required String payload,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(url, serializer);
-          sse_encode_String(payload, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 4,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_unit,
-          decodeErrorData: sse_decode_AnyhowException,
-        ),
-        constMeta: kCrateApiSinkToRemoteConstMeta,
-        argValues: [url, payload],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kCrateApiSinkToRemoteConstMeta =>
-      const TaskConstMeta(
-        debugName: "sink_to_remote",
-        argNames: ["url", "payload"],
-      );
 
   @override
   Future<void> crateApiStartMcpServer({

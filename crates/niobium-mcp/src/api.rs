@@ -6,7 +6,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use serde_json::Value;
 use tracing::info;
@@ -17,12 +17,8 @@ use crate::config::Config;
 use crate::core::event_bus::EventBus;
 use crate::core::events::Event;
 use crate::core::plugin::Plugin;
-use crate::plugins::hub_client::HubConfig;
 use crate::schema_store::SchemaStore;
 use crate::server::NiobiumServer;
-
-/// Global hub config for remote sink calls.
-static GLOBAL_HUB_CONFIG: OnceLock<HubConfig> = OnceLock::new();
 
 /// Callback type for showing a form. Receives JSON string, returns JSON string.
 pub type ShowFormFn =
@@ -242,20 +238,6 @@ pub async fn start_mcp_server_ffi(
         }
     });
 
-    // Plugin: Hub WebSocket client (if configured)
-    if let Some(hub_config) = HubConfig::from_env() {
-        let _ = GLOBAL_HUB_CONFIG.set(hub_config.clone());
-
-        let hub_plugin = crate::plugins::hub_client::HubClientPlugin::new(hub_config);
-        let hub_bus = bus.clone();
-        tokio::spawn(async move {
-            if let Err(e) = hub_plugin.start(hub_bus).await {
-                tracing::error!("hub-client plugin failed: {e}");
-            }
-        });
-        info!("hub-client plugin started (NIOBIUM_HUB_URL configured)");
-    }
-
     // Event bus router
     let router_bus = bus.clone();
     tokio::spawn(async move {
@@ -273,34 +255,6 @@ pub async fn start_mcp_server_ffi(
     bus.emit(Event::Shutdown);
     info!("niobium shutting down");
 
-    Ok(())
-}
-
-/// Sink a user response to a remote URL using hub auth.
-///
-/// Called from Dart after the user responds to a hub event (decision, form, etc.).
-/// POSTs the JSON payload to the given URL with the hub's Bearer token.
-pub async fn sink_to_remote(url: String, payload: String) -> anyhow::Result<()> {
-    let hub_config = GLOBAL_HUB_CONFIG
-        .get()
-        .ok_or_else(|| anyhow::anyhow!("hub not configured — cannot sink to remote"))?;
-
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", hub_config.api_key))
-        .header("Content-Type", "application/json")
-        .body(payload)
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("remote sink returned {status}: {body}");
-    }
-
-    info!(url, "remote sink: posted response");
     Ok(())
 }
 

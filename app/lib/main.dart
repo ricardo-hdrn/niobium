@@ -221,17 +221,7 @@ class _NiobiumAppState extends State<NiobiumApp> with WindowListener {
     event.response = result;
     _showPills();
 
-    // Sink to remote
-    if (event.hasRemoteSink) {
-      try {
-        await rust_api.sinkToRemote(
-          url: event.responseUrl!,
-          payload: jsonEncode({'choice': result}),
-        );
-      } catch (e) {
-        _handleShowToast('Failed to send response: $e', 'error');
-      }
-    }
+    // TODO: sink to remote (hub-specific, will be in niobe)
   }
 
   void _hidePills() async {
