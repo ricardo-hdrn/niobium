@@ -60,40 +60,38 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn serve(headless: bool) -> anyhow::Result<()> {
-    if !headless
-        && let Some(flutter_bin) = find_flutter_binary()
-    {
-            info!("launching Flutter app: {}", flutter_bin.display());
+    if !headless && let Some(flutter_bin) = find_flutter_binary() {
+        info!("launching Flutter app: {}", flutter_bin.display());
 
-            let start = std::time::Instant::now();
-            let status = Command::new(&flutter_bin)
-                .stdin(std::process::Stdio::inherit())
-                .stdout(std::process::Stdio::inherit())
-                .stderr(std::process::Stdio::inherit())
-                .status();
+        let start = std::time::Instant::now();
+        let status = Command::new(&flutter_bin)
+            .stdin(std::process::Stdio::inherit())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .status();
 
-            match status {
-                Ok(s) if s.success() => {
-                    std::process::exit(0);
-                }
-                Ok(s) => {
-                    let uptime = start.elapsed().as_millis();
-                    if uptime < CRASH_THRESHOLD_MS {
-                        eprintln!(
-                            "niobium: Flutter app crashed on startup (exit code: {}, uptime: {}ms) — falling back to headless mode",
-                            s.code().unwrap_or(-1),
-                            uptime
-                        );
-                    } else {
-                        std::process::exit(s.code().unwrap_or(1));
-                    }
-                }
-                Err(e) => {
+        match status {
+            Ok(s) if s.success() => {
+                std::process::exit(0);
+            }
+            Ok(s) => {
+                let uptime = start.elapsed().as_millis();
+                if uptime < CRASH_THRESHOLD_MS {
                     eprintln!(
-                        "niobium: failed to launch Flutter app: {e} — falling back to headless mode"
+                        "niobium: Flutter app crashed on startup (exit code: {}, uptime: {}ms) — falling back to headless mode",
+                        s.code().unwrap_or(-1),
+                        uptime
                     );
+                } else {
+                    std::process::exit(s.code().unwrap_or(1));
                 }
             }
+            Err(e) => {
+                eprintln!(
+                    "niobium: failed to launch Flutter app: {e} — falling back to headless mode"
+                );
+            }
+        }
     }
 
     // Headless mode: MCP server works but UI tools return cancelled/false.
