@@ -17,6 +17,7 @@ import 'widgets/dynamic_form.dart';
 import 'widgets/confirmation_dialog.dart';
 import 'widgets/output_display.dart';
 import 'widgets/pills_view.dart';
+import 'widgets/page_view.dart';
 import 'theme/niobium_theme.dart';
 
 void main() async {
@@ -89,6 +90,7 @@ class _NiobiumAppState extends State<NiobiumApp> with WindowListener {
       showToast: _handleShowToastFfi,
       showOutput: _handleShowOutputFfi,
       onPill: _handlePillFfi,
+      showPage: _handleShowPageFfi,
     ).then((_) {
       // MCP server exited (stdin closed) — shut down the app
       exit(0);
@@ -140,6 +142,46 @@ class _NiobiumAppState extends State<NiobiumApp> with WindowListener {
     final title = (json['title'] as String?) ?? 'Output';
     final display = NbDisplayConfig.fromJson(json);
     return _handleShowOutput(content, outputType, title, display: display);
+  }
+
+  /// FFI callback: agent requested a page (mixed content + inputs).
+  /// Receives JSON payload, returns JSON result or null if cancelled.
+  Future<String?> _handleShowPageFfi(String payload) async {
+    final json = jsonDecode(payload) as Map<String, dynamic>;
+    final children = json['children'] as List<dynamic>;
+    final title = (json['title'] as String?) ?? 'Page';
+    final prefill = json['prefill'] as Map<String, dynamic>?;
+    final display = NbDisplayConfig.fromJson(json);
+
+    final completer = Completer<Map<String, dynamic>?>();
+
+    final pageWidget = NbPageView(
+      children: children,
+      title: title,
+      prefill: prefill,
+      completer: completer,
+      display: display,
+    );
+
+    setState(() {
+      _currentView = display.accent != null
+          ? Theme(
+              data: applyAccent(buildNiobiumTheme(), display.accent),
+              child: pageWidget)
+          : pageWidget;
+    });
+
+    final w = display.width ?? 580;
+    final h = display.height ?? 720;
+    await windowManager.setSize(Size(w, h));
+    await windowManager.center();
+    await _showWindow();
+    final result = await completer.future;
+
+    await _returnFromPopup();
+
+    if (result == null) return null;
+    return jsonEncode(result);
   }
 
   /// FFI callback: a source plugin pushed a pill.

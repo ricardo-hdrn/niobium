@@ -36,6 +36,19 @@ pub enum Event {
         accent: Option<String>,
     },
 
+    /// Show a page with mixed content and input nodes.
+    ShowPage {
+        request_id: RequestId,
+        children: Value,
+        title: String,
+        prefill: Option<Value>,
+        width: Option<u32>,
+        height: Option<u32>,
+        density: Option<String>,
+        animate: Option<bool>,
+        accent: Option<String>,
+    },
+
     /// Show rich output content (markdown, JSON, table, diff) and await dismissal.
     ShowOutput {
         request_id: RequestId,
@@ -59,6 +72,15 @@ pub enum Event {
 
     /// User dismissed an output display.
     OutputDismissed { request_id: RequestId },
+
+    /// User submitted page data (page had input nodes).
+    PageSubmitted { request_id: RequestId, data: Value },
+
+    /// User dismissed a content-only page (no input nodes).
+    PageDismissed { request_id: RequestId },
+
+    /// User cancelled a page.
+    PageCancelled { request_id: RequestId },
 
     // ── Pipeline events ─────────────────────────────────────────────────
     /// A pipeline event (toast, stage progress) for UI forwarding.
@@ -119,10 +141,14 @@ impl Event {
             Event::ShowForm { request_id, .. }
             | Event::ShowConfirmation { request_id, .. }
             | Event::ShowOutput { request_id, .. }
+            | Event::ShowPage { request_id, .. }
             | Event::FormSubmitted { request_id, .. }
             | Event::FormCancelled { request_id }
             | Event::Confirmed { request_id, .. }
-            | Event::OutputDismissed { request_id } => Some(*request_id),
+            | Event::OutputDismissed { request_id }
+            | Event::PageSubmitted { request_id, .. }
+            | Event::PageDismissed { request_id }
+            | Event::PageCancelled { request_id } => Some(*request_id),
             Event::PipeEvent(_)
             | Event::Pill(_)
             | Event::Shutdown => None,

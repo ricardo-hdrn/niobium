@@ -20,6 +20,8 @@ Future<void> initLogging() => RustLib.instance.api.crateApiInitLogging();
 ///   with {message, severity}. Fire-and-forget.
 /// - `show_output`: Called to display rich output. Receives JSON string
 ///   with {content, output_type, title}. Return true when dismissed.
+/// - `show_page`: Called when the agent requests a page. Receives JSON string
+///   with {children, title, prefill}. Return JSON string with input data, or null if cancelled.
 ///
 /// This function blocks until the MCP server shuts down (stdin closes).
 Future<void> startMcpServer({
@@ -28,12 +30,14 @@ Future<void> startMcpServer({
   required FutureOr<void> Function(String) showToast,
   required FutureOr<bool> Function(String) showOutput,
   required FutureOr<void> Function(String) onPill,
+  required FutureOr<String?> Function(String) showPage,
 }) => RustLib.instance.api.crateApiStartMcpServer(
   showForm: showForm,
   showConfirm: showConfirm,
   showToast: showToast,
   showOutput: showOutput,
   onPill: onPill,
+  showPage: showPage,
 );
 
 /// Get the version of the Niobium MCP server.

@@ -95,6 +95,9 @@ impl EventBus {
                 | Event::FormCancelled { .. }
                 | Event::Confirmed { .. }
                 | Event::OutputDismissed { .. }
+                | Event::PageSubmitted { .. }
+                | Event::PageDismissed { .. }
+                | Event::PageCancelled { .. }
         )
     }
 

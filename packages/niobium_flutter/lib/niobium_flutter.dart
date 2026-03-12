@@ -13,6 +13,7 @@ export 'theme/niobium_theme.dart';
 export 'models/form_schema.dart';
 export 'models/display_config.dart';
 export 'models/pill.dart';
+export 'models/page_node.dart';
 
 // Utils
 export 'utils/schema_parser.dart';
@@ -24,3 +25,4 @@ export 'widgets/dynamic_form.dart';
 export 'widgets/confirmation_dialog.dart';
 export 'widgets/output_display.dart';
 export 'widgets/pills_view.dart';
+export 'widgets/page_view.dart';
