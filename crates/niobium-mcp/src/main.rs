@@ -60,8 +60,9 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn serve(headless: bool) -> anyhow::Result<()> {
-    if !headless {
-        if let Some(flutter_bin) = find_flutter_binary() {
+    if !headless
+        && let Some(flutter_bin) = find_flutter_binary()
+    {
             info!("launching Flutter app: {}", flutter_bin.display());
 
             let start = std::time::Instant::now();
@@ -93,7 +94,6 @@ fn serve(headless: bool) -> anyhow::Result<()> {
                     );
                 }
             }
-        }
     }
 
     // Headless mode: MCP server works but UI tools return cancelled/false.
