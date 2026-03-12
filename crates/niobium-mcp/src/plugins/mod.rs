@@ -1,1 +1,1 @@
-// Future: WASM-sandboxed plugin modules
+// Plugins directory — add new plugins here.

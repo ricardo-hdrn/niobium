@@ -84,6 +84,8 @@ abstract class RustLibApi extends BaseApi {
     required FutureOr<bool> Function(String) showConfirm,
     required FutureOr<void> Function(String) showToast,
     required FutureOr<bool> Function(String) showOutput,
+    required FutureOr<void> Function(String) onPill,
+    required FutureOr<String?> Function(String) showPage,
   });
 }
 
@@ -155,6 +157,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required FutureOr<bool> Function(String) showConfirm,
     required FutureOr<void> Function(String) showToast,
     required FutureOr<bool> Function(String) showOutput,
+    required FutureOr<void> Function(String) onPill,
+    required FutureOr<String?> Function(String) showPage,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -176,6 +180,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             showOutput,
             serializer,
           );
+          sse_encode_DartFn_Inputs_String_Output_unit_AnyhowException(
+            onPill,
+            serializer,
+          );
+          sse_encode_DartFn_Inputs_String_Output_opt_String_AnyhowException(
+            showPage,
+            serializer,
+          );
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -188,7 +200,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiStartMcpServerConstMeta,
-        argValues: [showForm, showConfirm, showToast, showOutput],
+        argValues: [
+          showForm,
+          showConfirm,
+          showToast,
+          showOutput,
+          onPill,
+          showPage,
+        ],
         apiImpl: this,
       ),
     );
@@ -196,7 +215,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiStartMcpServerConstMeta => const TaskConstMeta(
     debugName: "start_mcp_server",
-    argNames: ["showForm", "showConfirm", "showToast", "showOutput"],
+    argNames: [
+      "showForm",
+      "showConfirm",
+      "showToast",
+      "showOutput",
+      "onPill",
+      "showPage",
+    ],
   );
 
   Future<void> Function(int, dynamic)

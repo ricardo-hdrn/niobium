@@ -36,12 +36,21 @@ pub type ShowToastFn =
 pub type ShowOutputFn =
     Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
 
+/// Callback type for pill events. Receives JSON string (fire-and-forget).
+pub type OnPillFn = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+
+/// Callback type for showing a page. Receives JSON string, returns JSON string or null.
+pub type ShowPageFn =
+    Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = Option<String>> + Send>> + Send + Sync>;
+
 /// FFI bridge plugin that calls Dart functions directly instead of HTTP.
 struct FfiBridgePlugin {
     show_form: ShowFormFn,
     show_confirm: ShowConfirmFn,
     show_toast: ShowToastFn,
     show_output: ShowOutputFn,
+    on_pill: OnPillFn,
+    show_page: ShowPageFn,
 }
 
 #[async_trait::async_trait]
@@ -174,6 +183,67 @@ impl Plugin for FfiBridgePlugin {
                     bus.emit(Event::OutputDismissed { request_id });
                 }
 
+                Ok(Event::ShowPage {
+                    request_id,
+                    children,
+                    title,
+                    prefill,
+                    width,
+                    height,
+                    density,
+                    animate,
+                    accent,
+                }) => {
+                    let mut payload = serde_json::json!({
+                        "children": children,
+                        "title": title,
+                        "prefill": prefill,
+                    });
+                    if let Some(w) = width {
+                        payload["width"] = serde_json::json!(w);
+                    }
+                    if let Some(h) = height {
+                        payload["height"] = serde_json::json!(h);
+                    }
+                    if let Some(d) = density {
+                        payload["density"] = serde_json::json!(d);
+                    }
+                    if let Some(a) = animate {
+                        payload["animate"] = serde_json::json!(a);
+                    }
+                    if let Some(ac) = accent {
+                        payload["accent"] = serde_json::json!(ac);
+                    }
+                    let payload_str = serde_json::to_string(&payload).unwrap();
+
+                    let result = (self.show_page)(payload_str).await;
+
+                    match result {
+                        Some(json_str) => {
+                            let data: Value =
+                                serde_json::from_str(&json_str).unwrap_or(Value::Null);
+                            if data
+                                .get("dismissed")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
+                            {
+                                bus.emit(Event::PageDismissed { request_id });
+                            } else {
+                                bus.emit(Event::PageSubmitted { request_id, data });
+                            }
+                        }
+                        None => {
+                            bus.emit(Event::PageCancelled { request_id });
+                        }
+                    }
+                }
+
+                Ok(Event::Pill(pill)) => {
+                    if let Ok(json) = serde_json::to_string(&pill) {
+                        (self.on_pill)(json).await;
+                    }
+                }
+
                 Ok(Event::Shutdown) => {
                     info!("ffi-bridge: shutting down");
                     break;
@@ -202,6 +272,8 @@ pub async fn start_mcp_server_ffi(
     show_confirm: ShowConfirmFn,
     show_toast: ShowToastFn,
     show_output: ShowOutputFn,
+    on_pill: OnPillFn,
+    show_page: ShowPageFn,
 ) -> anyhow::Result<()> {
     let config = Config::load();
 
@@ -217,6 +289,8 @@ pub async fn start_mcp_server_ffi(
         show_confirm,
         show_toast,
         show_output,
+        on_pill,
+        show_page,
     };
     let ffi_bus = bus.clone();
     tokio::spawn(async move {
@@ -254,6 +328,16 @@ pub async fn start_mcp_server_headless() -> anyhow::Result<()> {
     let show_confirm: ShowConfirmFn = Arc::new(|_| Box::pin(async { false }));
     let show_toast: ShowToastFn = Arc::new(|_| Box::pin(async {}));
     let show_output: ShowOutputFn = Arc::new(|_| Box::pin(async { true }));
+    let on_pill: OnPillFn = Arc::new(|_| Box::pin(async {}));
+    let show_page: ShowPageFn = Arc::new(|_| Box::pin(async { None }));
 
-    start_mcp_server_ffi(show_form, show_confirm, show_toast, show_output).await
+    start_mcp_server_ffi(
+        show_form,
+        show_confirm,
+        show_toast,
+        show_output,
+        on_pill,
+        show_page,
+    )
+    .await
 }

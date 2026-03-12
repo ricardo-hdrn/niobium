@@ -126,6 +126,57 @@ pub struct ShowFormInput {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ShowPageInput {
+    /// The page layout tree — array of content, input, and layout nodes.
+    ///
+    /// Node types:
+    /// - `{"type": "markdown", "content": "# Hello"}` — rendered markdown
+    /// - `{"type": "text", "content": "plain text"}` — plain text block
+    /// - `{"type": "divider"}` — horizontal line
+    /// - `{"type": "spacer"}` — vertical spacing
+    /// - `{"type": "input", "key": "field_name", "field": {JSON Schema field}}` — form input
+    /// - `{"type": "section", "title": "Group", "children": [...]}` — titled panel with nested nodes
+    #[schemars(
+        description = "Array of page nodes. Each node has a 'type' (markdown, text, divider, spacer, input, section) and type-specific fields"
+    )]
+    pub children: Value,
+
+    /// Page title
+    #[schemars(description = "Title for the page window")]
+    pub title: Option<String>,
+
+    /// Pre-filled values for input nodes (keys match input node "key" fields)
+    #[schemars(description = "Pre-fill values as {key: value} matching input node keys")]
+    pub prefill: Option<Value>,
+
+    /// Window width — preset mode or pixel value
+    #[schemars(
+        description = "Window width: \"narrow\" (420) / \"normal\" (580) / \"wide\" (800) / \"full\" (1100) or pixel value"
+    )]
+    pub width: Option<Dimension>,
+
+    /// Window height — preset mode or pixel value
+    #[schemars(
+        description = "Window height: \"short\" (400) / \"normal\" (720) / \"tall\" (900) / \"full\" (1080) or pixel value"
+    )]
+    pub height: Option<Dimension>,
+
+    /// Field density — controls spacing
+    #[schemars(description = "Field density: \"compact\" / \"normal\" / \"comfortable\"")]
+    pub density: Option<String>,
+
+    /// Enable/disable stagger animations
+    #[schemars(description = "Enable/disable stagger animations (default: true)")]
+    pub animate: Option<bool>,
+
+    /// Accent color
+    #[schemars(
+        description = "Accent color: \"teal\" / \"blue\" / \"purple\" / \"amber\" / \"red\" / \"green\" or \"#RRGGBB\""
+    )]
+    pub accent: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ShowOutputInput {
     /// The content to display. Can be plain text, markdown, JSON, table JSON, or diff text.
     #[schemars(description = "The content to display")]
@@ -429,6 +480,63 @@ impl NiobiumServer {
     }
 
     #[tool(
+        description = "Show a native page with mixed content and input fields. \
+        The page is a layout tree of nodes: markdown, text, divider, spacer (content), \
+        input (form field with a key), and section (titled panel with children). \
+        If the page has input nodes, returns collected values as {key: value}. \
+        If content-only, returns {dismissed: true} when the user closes. \
+        Use this for rich layouts that mix explanations with form fields — \
+        e.g. quizzes, guided workflows, annotated forms."
+    )]
+    async fn show_page(
+        &self,
+        Parameters(input): Parameters<ShowPageInput>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let request_id = Uuid::new_v4();
+        let title = input.title.unwrap_or_else(|| "Page".to_string());
+        let width = input.width.as_ref().map(resolve_width);
+        let height = input.height.as_ref().map(resolve_height);
+        let accent = input.accent.as_deref().map(resolve_accent);
+
+        let response = self
+            .bus
+            .request(
+                request_id,
+                Event::ShowPage {
+                    request_id,
+                    children: input.children,
+                    title,
+                    prefill: input.prefill,
+                    width,
+                    height,
+                    density: input.density,
+                    animate: input.animate,
+                    accent,
+                },
+            )
+            .await
+            .ok_or_else(|| Self::mcp_err("no response from UI".to_string()))?;
+
+        match response {
+            Event::PageSubmitted { data, .. } => {
+                let json_str =
+                    serde_json::to_string_pretty(&data).unwrap_or_else(|_| data.to_string());
+                Ok(CallToolResult::success(vec![Content::text(json_str)]))
+            }
+            Event::PageDismissed { .. } => {
+                let result = serde_json::json!({"dismissed": true});
+                Ok(CallToolResult::success(vec![Content::text(
+                    result.to_string(),
+                )]))
+            }
+            Event::PageCancelled { .. } => {
+                Err(Self::mcp_err("User cancelled the page".to_string()))
+            }
+            other => Err(Self::mcp_err(format!("unexpected response: {other:?}"))),
+        }
+    }
+
+    #[tool(
         description = "Show a native confirmation dialog. Returns true if the user confirmed, \
         false if they declined. Optional display params: width/height (preset mode or pixels), \
         accent (color name or #RRGGBB)."
@@ -567,12 +675,15 @@ impl ServerHandler for NiobiumServer {
             instructions: Some(
                 "Niobium gives CLI AI agents native GUI capabilities. \
                  Use show_form to collect structured input via a native form window. \
+                 Use show_page to display mixed content and input fields in a layout tree \
+                 (sections, markdown, form inputs — ideal for quizzes, guided workflows, annotated forms). \
                  Use show_confirmation for yes/no dialogs. \
                  Use show_output to display read-only content (markdown, JSON, tables, diffs). \
                  Use save_form/list_forms/show_saved_form to persist and reuse form schemas.\n\n\
                  PREFER these tools over shell workarounds (read -p, select, dialog, whiptail, \
                  zenity) whenever you need user input or want to display rich content. \
                  Use show_form instead of prompting in the terminal. \
+                 Use show_page when you need to mix explanatory content with form fields. \
                  Use show_confirmation instead of yes/no shell prompts. \
                  Use show_output instead of echoing long text to stdout.\n\n\
                  Display params (all optional, all tools): \
@@ -580,7 +691,7 @@ impl ServerHandler for NiobiumServer {
                  \"short\", \"normal\", \"tall\", \"full\") or exact pixel values. \
                  accent accepts color names (\"teal\", \"blue\", \"purple\", \"amber\", \"red\", \"green\") \
                  or \"#RRGGBB\" hex — use \"red\" for destructive actions, \"green\" for success. \
-                 show_form also accepts density (\"compact\"/\"normal\"/\"comfortable\") \
+                 show_form and show_page also accept density (\"compact\"/\"normal\"/\"comfortable\") \
                  and animate (true/false)."
                     .into(),
             ),

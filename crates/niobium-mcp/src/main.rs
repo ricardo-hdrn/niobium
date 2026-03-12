@@ -12,6 +12,10 @@ use std::process::Command;
 use clap::{Parser, Subcommand};
 use tracing::info;
 
+/// Minimum uptime (ms) before we consider the Flutter app "alive".
+/// If it exits faster than this, we assume it crashed on startup.
+const CRASH_THRESHOLD_MS: u128 = 2000;
+
 #[derive(Parser)]
 #[command(name = "niobium", about = "Native GUI runtime for CLI AI agents")]
 struct Cli {
@@ -22,7 +26,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Start MCP server on stdio (default)
-    Serve,
+    Serve {
+        /// Skip Flutter app, run MCP server without UI
+        #[arg(long, env = "NIOBIUM_HEADLESS")]
+        headless: bool,
+    },
     /// Register Niobium with an AI agent
     Install {
         #[command(subcommand)]
@@ -41,8 +49,8 @@ enum InstallTarget {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    match cli.command.unwrap_or(Cmd::Serve) {
-        Cmd::Serve => serve(),
+    match cli.command.unwrap_or(Cmd::Serve { headless: false }) {
+        Cmd::Serve { headless } => serve(headless),
         Cmd::Install { target } => install(target),
         Cmd::Version => {
             println!("niobium {}", env!("CARGO_PKG_VERSION"));
@@ -51,33 +59,42 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-fn serve() -> anyhow::Result<()> {
-    // Try to find the Flutter app binary and trampoline into it.
-    // The Flutter app runs the MCP server in-process via FFI.
-    if let Some(flutter_bin) = find_flutter_binary() {
-        info!("trampolining to Flutter app: {}", flutter_bin.display());
+fn serve(headless: bool) -> anyhow::Result<()> {
+    if !headless && let Some(flutter_bin) = find_flutter_binary() {
+        info!("launching Flutter app: {}", flutter_bin.display());
 
-        // exec() replaces this process with the Flutter app
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            let err = Command::new(&flutter_bin).exec();
-            anyhow::bail!("failed to exec Flutter app: {err}");
-        }
+        let start = std::time::Instant::now();
+        let status = Command::new(&flutter_bin)
+            .stdin(std::process::Stdio::inherit())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .status();
 
-        #[cfg(not(unix))]
-        {
-            let status = Command::new(&flutter_bin)
-                .stdin(std::process::Stdio::inherit())
-                .stdout(std::process::Stdio::inherit())
-                .stderr(std::process::Stdio::inherit())
-                .status()?;
-            std::process::exit(status.code().unwrap_or(1));
+        match status {
+            Ok(s) if s.success() => {
+                std::process::exit(0);
+            }
+            Ok(s) => {
+                let uptime = start.elapsed().as_millis();
+                if uptime < CRASH_THRESHOLD_MS {
+                    eprintln!(
+                        "niobium: Flutter app crashed on startup (exit code: {}, uptime: {}ms) — falling back to headless mode",
+                        s.code().unwrap_or(-1),
+                        uptime
+                    );
+                } else {
+                    std::process::exit(s.code().unwrap_or(1));
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "niobium: failed to launch Flutter app: {e} — falling back to headless mode"
+                );
+            }
         }
     }
 
-    // No Flutter binary found — fall back to headless mode.
-    // MCP server works but UI tools (show_form, show_confirmation) return cancelled/false.
+    // Headless mode: MCP server works but UI tools return cancelled/false.
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -87,7 +104,14 @@ fn serve() -> anyhow::Result<()> {
         .with_ansi(false)
         .init();
 
-    info!("Flutter app not found — starting in headless mode");
+    info!(
+        "{}",
+        if headless {
+            "starting in headless mode (--headless)"
+        } else {
+            "Flutter app not found — starting in headless mode"
+        }
+    );
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
