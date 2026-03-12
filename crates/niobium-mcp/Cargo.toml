@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 description = "Niobium MCP server — native GUI for CLI AI agents"
 license = "AGPL-3.0-or-later"
+repository = "https://github.com/ricardo-hdrn/niobium"
+homepage = "https://github.com/ricardo-hdrn/niobium"
+keywords = ["mcp", "ai", "gui", "forms", "cli"]
+categories = ["command-line-utilities", "gui"]
 
 [lib]
 name = "niobium_mcp"

@@ -1,0 +1,20 @@
+{
+  "name": "niobium-mcp",
+  "version": "0.1.0",
+  "description": "Native GUI runtime for CLI AI agents — forms, confirmations, rich output, and page layouts via MCP",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ricardo-hdrn/niobium.git"
+  },
+  "keywords": ["mcp", "ai", "cli", "gui", "forms", "niobium"],
+  "bin": {
+    "niobium": "bin/niobium.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "mcpName": "io.github.ricardo-hdrn/niobium",
+  "os": ["darwin", "linux", "win32"],
+  "cpu": ["x64", "arm64"]
+}
