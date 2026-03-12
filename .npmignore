@@ -1,0 +1,29 @@
+# Rust source and build artifacts
+/crates
+/target
+Cargo.toml
+Cargo.lock
+
+# Flutter app source
+/app
+/packages
+
+# Dev files
+/.github
+/docs
+CLAUDE.md
+ARCHITECTURE.md
+RESEARCH.md
+.claude/
+.gitignore
+flutter_rust_bridge.yaml
+
+# Downloaded native binaries (installed at postinstall)
+bin/niobium
+bin/niobium.exe
+bin/niobium-app
+bin/niobium-app.app
+
+# Registry tokens
+server.json
+.mcpregistry_*
