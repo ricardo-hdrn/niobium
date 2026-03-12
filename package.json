@@ -1,6 +1,6 @@
 {
   "name": "niobium-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Native GUI runtime for CLI AI agents — forms, confirmations, rich output, and page layouts via MCP",
   "license": "AGPL-3.0-or-later",
   "repository": {
