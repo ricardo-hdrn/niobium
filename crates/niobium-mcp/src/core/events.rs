@@ -149,9 +149,7 @@ impl Event {
             | Event::PageSubmitted { request_id, .. }
             | Event::PageDismissed { request_id }
             | Event::PageCancelled { request_id } => Some(*request_id),
-            Event::PipeEvent(_)
-            | Event::Pill(_)
-            | Event::Shutdown => None,
+            Event::PipeEvent(_) | Event::Pill(_) | Event::Shutdown => None,
         }
     }
 }

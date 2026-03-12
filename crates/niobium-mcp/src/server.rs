@@ -519,8 +519,8 @@ impl NiobiumServer {
 
         match response {
             Event::PageSubmitted { data, .. } => {
-                let json_str = serde_json::to_string_pretty(&data)
-                    .unwrap_or_else(|_| data.to_string());
+                let json_str =
+                    serde_json::to_string_pretty(&data).unwrap_or_else(|_| data.to_string());
                 Ok(CallToolResult::success(vec![Content::text(json_str)]))
             }
             Event::PageDismissed { .. } => {

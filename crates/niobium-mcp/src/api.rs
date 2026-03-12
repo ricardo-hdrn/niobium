@@ -37,8 +37,7 @@ pub type ShowOutputFn =
     Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
 
 /// Callback type for pill events. Receives JSON string (fire-and-forget).
-pub type OnPillFn =
-    Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+pub type OnPillFn = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 /// Callback type for showing a page. Receives JSON string, returns JSON string or null.
 pub type ShowPageFn =
