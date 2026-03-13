@@ -142,63 +142,57 @@ class NbTitleBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = Theme.of(context).colorScheme.primary;
     final accentDim = Theme.of(context).colorScheme.secondary;
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onPanStart: (_) {
-        // Start window drag — window_manager handles this via DragToMoveArea
-      },
-      child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        decoration: const BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: NbColors.glassBorder, width: 0.5),
-          ),
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: const BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: NbColors.glassBorder, width: 0.5),
         ),
-        child: Row(
-          children: [
-            // Niobium icon
-            Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [accent, accentDim],
+      ),
+      child: Row(
+        children: [
+          // Niobium icon
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [accent, accentDim],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: accent.withValues(alpha: 0.19),
+                  blurRadius: 8,
+                  spreadRadius: 1,
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: accent.withValues(alpha: 0.19),
-                    blurRadius: 8,
-                    spreadRadius: 1,
-                  ),
-                ],
-              ),
-              child: const Icon(Icons.hexagon_outlined,
-                  size: 14, color: NbColors.textOnAccent),
+              ],
             ),
-            const SizedBox(width: 12),
-            Text(
-              title,
-              style: const TextStyle(
-                color: NbColors.textPrimary,
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                letterSpacing: 0.3,
-              ),
+            child: const Icon(Icons.hexagon_outlined,
+                size: 14, color: NbColors.textOnAccent),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            title,
+            style: const TextStyle(
+              color: NbColors.textPrimary,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0.3,
             ),
-            const Spacer(),
-            if (actions != null) ...actions!,
-            if (onClose != null)
-              _WindowButton(
-                icon: Icons.close,
-                onTap: onClose!,
-                hoverColor: NbColors.error.withValues(alpha: 0.15),
-              ),
-          ],
-        ),
+          ),
+          const Spacer(),
+          if (actions != null) ...actions!,
+          if (onClose != null)
+            _WindowButton(
+              icon: Icons.close,
+              onTap: onClose!,
+              hoverColor: NbColors.error.withValues(alpha: 0.15),
+            ),
+        ],
       ),
     );
   }
