@@ -361,14 +361,14 @@ fn parse_nb_attrs(attr_str: &str) -> (HashMap<String, Value>, Option<String>) {
             if !before_eq.contains(' ') {
                 let key = before_eq.trim();
                 let after_eq = &rest[eq_pos + 1..];
-                if let Some(quoted) = after_eq.strip_prefix('"') {
-                    if let Some(end_quote) = quoted.find('"') {
-                        let val_str = &quoted[..end_quote];
-                        let value = try_parse_number(val_str);
-                        props.insert(key.to_string(), value);
-                        rest = &quoted[end_quote + 1..];
-                        continue;
-                    }
+                if let Some(quoted) = after_eq.strip_prefix('"')
+                    && let Some(end_quote) = quoted.find('"')
+                {
+                    let val_str = &quoted[..end_quote];
+                    let value = try_parse_number(val_str);
+                    props.insert(key.to_string(), value);
+                    rest = &quoted[end_quote + 1..];
+                    continue;
                 }
             }
         }
@@ -563,7 +563,7 @@ fn md_to_page_nodes(markdown: &str) -> Value {
     /// Push a node into the deepest open context (nb stack, h2, h1, or root).
     fn push_node(
         node: Value,
-        nb_stack: &mut Vec<NbFrame>,
+        nb_stack: &mut [NbFrame],
         h2_title: &Option<String>,
         h2_children: &mut Vec<Value>,
         h1_title: &Option<String>,
