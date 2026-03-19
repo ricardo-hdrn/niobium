@@ -361,13 +361,12 @@ fn parse_nb_attrs(attr_str: &str) -> (HashMap<String, Value>, Option<String>) {
             if !before_eq.contains(' ') {
                 let key = before_eq.trim();
                 let after_eq = &rest[eq_pos + 1..];
-                if after_eq.starts_with('"') {
-                    // Quoted value
-                    if let Some(end_quote) = after_eq[1..].find('"') {
-                        let val_str = &after_eq[1..1 + end_quote];
+                if let Some(quoted) = after_eq.strip_prefix('"') {
+                    if let Some(end_quote) = quoted.find('"') {
+                        let val_str = &quoted[..end_quote];
                         let value = try_parse_number(val_str);
                         props.insert(key.to_string(), value);
-                        rest = &after_eq[2 + end_quote..];
+                        rest = &quoted[end_quote + 1..];
                         continue;
                     }
                 }
@@ -396,10 +395,10 @@ fn try_parse_number(s: &str) -> Value {
     if let Ok(i) = s.parse::<i64>() {
         return Value::Number(i.into());
     }
-    if let Ok(f) = s.parse::<f64>() {
-        if let Some(n) = serde_json::Number::from_f64(f) {
-            return Value::Number(n);
-        }
+    if let Ok(f) = s.parse::<f64>()
+        && let Some(n) = serde_json::Number::from_f64(f)
+    {
+        return Value::Number(n);
     }
     Value::String(s.to_string())
 }
@@ -461,6 +460,7 @@ struct NbFrame {
     /// Accumulated children nodes
     children: Vec<Value>,
     /// For sibling-separator parents (row/tabs): the current sibling tag and its children
+    #[allow(clippy::type_complexity)]
     current_sibling: Option<(String, HashMap<String, Value>, Option<String>, Vec<Value>)>,
 }
 
@@ -483,20 +483,20 @@ impl NbFrame {
 
     /// Flush the current sibling (col/tab) into children.
     fn flush_sibling(&mut self) {
-        if let Some((sib_tag, sib_props, sib_title, sib_children)) = self.current_sibling.take() {
-            if !sib_children.is_empty() || sib_title.is_some() {
-                let mut node = serde_json::json!({
-                    "type": sib_tag,
-                    "children": sib_children,
-                });
-                if let Some(t) = sib_title {
-                    node["title"] = Value::String(t);
-                }
-                if !sib_props.is_empty() {
-                    node["props"] = serde_json::to_value(&sib_props).unwrap_or_default();
-                }
-                self.children.push(node);
+        if let Some((sib_tag, sib_props, sib_title, sib_children)) = self.current_sibling.take()
+            && (!sib_children.is_empty() || sib_title.is_some())
+        {
+            let mut node = serde_json::json!({
+                "type": sib_tag,
+                "children": sib_children,
+            });
+            if let Some(t) = sib_title {
+                node["title"] = Value::String(t);
             }
+            if !sib_props.is_empty() {
+                node["props"] = serde_json::to_value(&sib_props).unwrap_or_default();
+            }
+            self.children.push(node);
         }
     }
 
@@ -704,24 +704,14 @@ fn md_to_page_nodes(markdown: &str) -> Value {
                     // Closing niobium fence — parse JSON and inject node(s)
                     in_fence = None;
                     let json_str = nb_buf.trim();
-                    if !json_str.is_empty() {
-                        if let Ok(val) = serde_json::from_str::<Value>(json_str) {
-                            // Support both single node and array of nodes
-                            if let Some(arr) = val.as_array() {
-                                for node in arr {
-                                    push_node(
-                                        node.clone(),
-                                        &mut nb_stack,
-                                        &h2_title,
-                                        &mut h2_children,
-                                        &h1_title,
-                                        &mut h1_children,
-                                        &mut root,
-                                    );
-                                }
-                            } else {
+                    if !json_str.is_empty()
+                        && let Ok(val) = serde_json::from_str::<Value>(json_str)
+                    {
+                        // Support both single node and array of nodes
+                        if let Some(arr) = val.as_array() {
+                            for node in arr {
                                 push_node(
-                                    val,
+                                    node.clone(),
                                     &mut nb_stack,
                                     &h2_title,
                                     &mut h2_children,
@@ -730,6 +720,16 @@ fn md_to_page_nodes(markdown: &str) -> Value {
                                     &mut root,
                                 );
                             }
+                        } else {
+                            push_node(
+                                val,
+                                &mut nb_stack,
+                                &h2_title,
+                                &mut h2_children,
+                                &h1_title,
+                                &mut h1_children,
+                                &mut root,
+                            );
                         }
                     }
                     nb_buf.clear();
