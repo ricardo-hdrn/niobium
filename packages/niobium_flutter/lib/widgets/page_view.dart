@@ -4,6 +4,7 @@
 // Returns collected input values on submit, or null on cancel.
 
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import '../models/form_schema.dart';
@@ -236,6 +237,32 @@ class _NbPageViewState extends State<NbPageView> {
       'spacer' => const SizedBox(height: NbSpacing.lg),
       'input' => _buildInputNode(node),
       'section' => _buildSection(node),
+      // Leaf nodes
+      'alert' => _buildAlert(node),
+      'stat' => _buildStat(node),
+      'badge' => _buildBadge(node),
+      'progress' => _buildProgress(node),
+      'blockquote' => _buildBlockquote(node),
+      'image' => _buildImage(node),
+      'table' => Padding(
+          padding: const EdgeInsets.only(bottom: NbSpacing.md),
+          child: OutputDisplay.buildContentWidget(
+              context, 'table', node.content ?? '{}'),
+        ),
+      // Container nodes
+      'row' => _buildRow(node),
+      'card' => _buildCard(node),
+      'collapse' => _NbCollapse(
+          node: node,
+          children:
+              node.children != null ? _buildNodes(node.children!) : [],
+        ),
+      'tabs' => _buildTabs(node),
+      'tab' || 'col' => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: node.children != null ? _buildNodes(node.children!) : [],
+        ),
+      'hero' => _buildHero(node),
       _ => const SizedBox.shrink(),
     };
   }
@@ -269,6 +296,414 @@ class _NbPageViewState extends State<NbPageView> {
       ),
     );
   }
+
+  // ── Leaf node builders ──────────────────────────────────────────────────
+
+  Widget _buildAlert(PageNode node) {
+    final variant = node.props['variant'] as String? ?? 'info';
+    final (color, icon) = switch (variant) {
+      'warning' => (NbColors.warning, Icons.warning_amber_rounded),
+      'error' => (NbColors.error, Icons.error_outline),
+      'success' => (NbColors.success, Icons.check_circle_outline),
+      'tip' => (const Color(0xFFA78BFA), Icons.lightbulb_outline),
+      _ => (NbColors.accent, Icons.info_outline), // info
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: NbSpacing.md),
+      child: Container(
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(NbRadius.sm),
+          border: Border(left: BorderSide(color: color, width: 3)),
+        ),
+        padding: const EdgeInsets.all(NbSpacing.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(icon, color: color, size: 18),
+              const SizedBox(width: 8),
+              if (node.title != null)
+                Text(node.title!,
+                    style: TextStyle(
+                        color: color,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14))
+              else
+                Text(variant[0].toUpperCase() + variant.substring(1),
+                    style: TextStyle(
+                        color: color,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14)),
+            ]),
+            if (node.content != null) ...[
+              const SizedBox(height: 8),
+              OutputDisplay.buildContentWidget(
+                  context, 'markdown', node.content!),
+            ],
+            if (node.children != null) ...[
+              const SizedBox(height: 8),
+              ..._buildNodes(node.children!),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStat(PageNode node) {
+    final label = node.props['label']?.toString() ?? '';
+    final value = node.props['value']?.toString() ?? '';
+    final detail = node.props['detail'] as String?;
+    final variant = node.props['variant'] as String?;
+    final valueColor = switch (variant) {
+      'success' => NbColors.success,
+      'warning' => NbColors.warning,
+      'error' => NbColors.error,
+      _ => NbColors.textPrimary,
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: NbSpacing.md),
+      child: GlassPanel(
+        child: Padding(
+          padding: const EdgeInsets.all(NbSpacing.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label,
+                  style: const TextStyle(
+                      color: NbColors.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500)),
+              const SizedBox(height: 4),
+              Text(value,
+                  style: TextStyle(
+                      color: valueColor,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700)),
+              if (detail != null) ...[
+                const SizedBox(height: 2),
+                Text(detail,
+                    style: const TextStyle(
+                        color: NbColors.textTertiary, fontSize: 12)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBadge(PageNode node) {
+    final variant = node.props['variant'] as String? ?? 'default';
+    final color = switch (variant) {
+      'success' => NbColors.success,
+      'warning' => NbColors.warning,
+      'error' => NbColors.error,
+      'info' => NbColors.accent,
+      _ => NbColors.textSecondary,
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: NbSpacing.sm),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(NbRadius.sm),
+          ),
+          child: Text(
+            node.content ?? '',
+            style: TextStyle(
+                color: color, fontSize: 12, fontWeight: FontWeight.w500),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProgress(PageNode node) {
+    final value = (node.props['value'] as num?)?.toDouble();
+    final label = node.props['label'] as String?;
+    final detail = node.props['detail'] as String?;
+    final variant = node.props['variant'] as String?;
+    final color = switch (variant) {
+      'success' => NbColors.success,
+      'warning' => NbColors.warning,
+      'error' => NbColors.error,
+      _ => Theme.of(context).colorScheme.primary,
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: NbSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (label != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(label,
+                  style: const TextStyle(
+                      color: NbColors.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500)),
+            ),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: value != null
+                ? LinearProgressIndicator(
+                    value: value,
+                    backgroundColor: NbColors.surfaceElevated,
+                    color: color,
+                    minHeight: 6)
+                : LinearProgressIndicator(
+                    backgroundColor: NbColors.surfaceElevated,
+                    color: color,
+                    minHeight: 6),
+          ),
+          if (detail != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Text(detail,
+                    style: const TextStyle(
+                        color: NbColors.textTertiary, fontSize: 11)),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBlockquote(PageNode node) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: NbSpacing.md),
+      child: Container(
+        decoration: const BoxDecoration(
+          border: Border(
+              left: BorderSide(color: NbColors.textTertiary, width: 2)),
+        ),
+        padding: const EdgeInsets.only(left: 16, top: 4, bottom: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              node.content ?? '',
+              style: const TextStyle(
+                  color: NbColors.textSecondary,
+                  fontSize: 13,
+                  fontStyle: FontStyle.italic,
+                  height: 1.6),
+            ),
+            if (node.title != null) ...[
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(node.title!,
+                    style: const TextStyle(
+                        color: NbColors.textTertiary, fontSize: 12)),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImage(PageNode node) {
+    final url = node.content ?? '';
+    final alt = node.props['alt'] as String? ?? '';
+    final maxHeight = (node.props['height'] as num?)?.toDouble();
+    final maxWidth = (node.props['width'] as num?)?.toDouble();
+
+    Widget image;
+    if (url.startsWith('data:')) {
+      // Base64 data URI
+      final parts = url.split(',');
+      if (parts.length == 2) {
+        try {
+          final bytes = base64Decode(parts[1]);
+          image = Image.memory(bytes, fit: BoxFit.contain);
+        } catch (_) {
+          image = Text(alt.isEmpty ? 'Invalid image' : alt,
+              style: const TextStyle(color: NbColors.textSecondary));
+        }
+      } else {
+        image = Text(alt,
+            style: const TextStyle(color: NbColors.textSecondary));
+      }
+    } else {
+      image = Image.network(
+        url,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => Text(
+            alt.isEmpty ? 'Failed to load image' : alt,
+            style: const TextStyle(color: NbColors.textSecondary)),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: NbSpacing.md),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(NbRadius.md),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: maxHeight ?? double.infinity,
+            maxWidth: maxWidth ?? double.infinity,
+          ),
+          child: image,
+        ),
+      ),
+    );
+  }
+
+  // ── Container node builders ─────────────────────────────────────────────
+
+  Widget _buildRow(PageNode node) {
+    if (node.children == null || node.children!.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final gap = (node.props['gap'] as num?)?.toDouble() ?? 16;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: NbSpacing.md),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < node.children!.length; i++) ...[
+            if (i > 0) SizedBox(width: gap),
+            Expanded(
+              flex: (node.children![i].props['flex'] as int?) ?? 1,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                // Unwrap col nodes — render their children directly
+                children: node.children![i].type == 'col' && node.children![i].children != null
+                    ? _buildNodes(node.children![i].children!)
+                    : [_buildNode(node.children![i])],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCard(PageNode node) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: NbSpacing.md),
+      child: GlassPanel(
+        elevated: true,
+        child: Padding(
+          padding: const EdgeInsets.all(NbSpacing.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (node.title != null) ...[
+                Text(node.title!,
+                    style: const TextStyle(
+                        color: NbColors.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500)),
+                const SizedBox(height: NbSpacing.sm),
+              ],
+              if (node.content != null)
+                OutputDisplay.buildContentWidget(
+                    context, 'markdown', node.content!),
+              if (node.children != null) ..._buildNodes(node.children!),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabs(PageNode node) {
+    final tabs = node.children ?? [];
+    if (tabs.isEmpty) return const SizedBox.shrink();
+    final tabHeight = (node.props['height'] as num?)?.toDouble() ?? 300;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: NbSpacing.md),
+      child: DefaultTabController(
+        length: tabs.length,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TabBar(
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              labelColor: Theme.of(context).colorScheme.primary,
+              unselectedLabelColor: NbColors.textSecondary,
+              indicatorColor: Theme.of(context).colorScheme.primary,
+              dividerColor: NbColors.glassBorder,
+              tabs: tabs.map((t) => Tab(text: t.title ?? 'Tab')).toList(),
+            ),
+            SizedBox(
+              height: tabHeight,
+              child: TabBarView(
+                children: tabs
+                    .map((tab) => SingleChildScrollView(
+                          padding: const EdgeInsets.all(NbSpacing.md),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: tab.children != null
+                                ? _buildNodes(tab.children!)
+                                : [],
+                          ),
+                        ))
+                    .toList(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHero(PageNode node) {
+    final accent = Theme.of(context).colorScheme.primary;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: NbSpacing.lg),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(
+            vertical: NbSpacing.xl, horizontal: NbSpacing.lg),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [accent.withValues(alpha: 0.08), Colors.transparent],
+          ),
+          borderRadius: BorderRadius.circular(NbRadius.md),
+          border: Border.all(color: accent.withValues(alpha: 0.15)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (node.title != null)
+              Text(node.title!,
+                  style: const TextStyle(
+                      color: NbColors.textPrimary,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700)),
+            if (node.content != null) ...[
+              const SizedBox(height: 8),
+              Text(node.content!,
+                  style: const TextStyle(
+                      color: NbColors.textSecondary,
+                      fontSize: 14,
+                      height: 1.5)),
+            ],
+            if (node.children != null) ...[
+              const SizedBox(height: NbSpacing.md),
+              ..._buildNodes(node.children!),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Input node builder ──────────────────────────────────────────────────
 
   Widget _buildInputNode(PageNode node) {
     if (node.key == null || node.field == null) return const SizedBox.shrink();
@@ -450,6 +885,72 @@ class _NbPageViewState extends State<NbPageView> {
     if (!widget.completer.isCompleted) {
       widget.completer.complete(null);
     }
+  }
+}
+
+// ── Stateful node widgets ───────────────────────────────────────────────
+
+class _NbCollapse extends StatefulWidget {
+  final PageNode node;
+  final List<Widget> children;
+  const _NbCollapse({required this.node, required this.children});
+  @override
+  State<_NbCollapse> createState() => _NbCollapseState();
+}
+
+class _NbCollapseState extends State<_NbCollapse> {
+  late bool _expanded;
+  @override
+  void initState() {
+    super.initState();
+    _expanded = widget.node.props['expanded'] == true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: NbSpacing.md),
+      child: GlassPanel(
+        child: Column(
+          children: [
+            InkWell(
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: Padding(
+                padding: const EdgeInsets.all(NbSpacing.md),
+                child: Row(
+                  children: [
+                    Icon(
+                      _expanded ? Icons.expand_less : Icons.expand_more,
+                      color: NbColors.textSecondary,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        widget.node.title ?? 'Details',
+                        style: const TextStyle(
+                            color: NbColors.textPrimary,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (_expanded)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    NbSpacing.md, 0, NbSpacing.md, NbSpacing.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: widget.children,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

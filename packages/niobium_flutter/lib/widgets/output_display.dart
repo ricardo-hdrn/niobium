@@ -9,6 +9,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:markdown/markdown.dart' as md;
 import 'package:window_manager/window_manager.dart';
 import '../theme/niobium_theme.dart';
 
@@ -58,6 +59,7 @@ class OutputDisplay extends StatefulWidget {
     return MarkdownBody(
       data: content,
       selectable: true,
+      extensionSet: md.ExtensionSet.gitHubWeb,
       styleSheet: MarkdownStyleSheet(
         p: const TextStyle(color: NbColors.textPrimary, fontSize: 13, height: 1.6),
         h1: const TextStyle(color: NbColors.accent, fontSize: 22, fontWeight: FontWeight.w700),
@@ -78,6 +80,10 @@ class OutputDisplay extends StatefulWidget {
         blockquoteDecoration: const BoxDecoration(
           border: Border(left: BorderSide(color: NbColors.accent, width: 3)),
         ),
+        tableBorder: TableBorder.all(color: NbColors.glassBorder, width: 0.5),
+        tableHead: const TextStyle(color: NbColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 13),
+        tableBody: const TextStyle(color: NbColors.textSecondary, fontSize: 13),
+        tableCellsPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         listBullet: const TextStyle(color: NbColors.accent),
         strong: const TextStyle(color: NbColors.textPrimary, fontWeight: FontWeight.w600),
         em: const TextStyle(color: NbColors.textSecondary, fontStyle: FontStyle.italic),

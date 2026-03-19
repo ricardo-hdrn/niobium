@@ -8,6 +8,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:markdown/markdown.dart' as md;
 import 'package:window_manager/window_manager.dart';
 import '../theme/niobium_theme.dart';
 
@@ -51,12 +53,42 @@ class OutputDisplay extends StatefulWidget {
   }
 
   static Widget _buildMarkdown(String content) {
-    return SelectableText(
-      content,
-      style: const TextStyle(
-        color: NbColors.textPrimary,
-        fontSize: 13,
-        height: 1.6,
+    return MarkdownBody(
+      data: content,
+      selectable: true,
+      extensionSet: md.ExtensionSet.gitHubWeb,
+      styleSheet: MarkdownStyleSheet(
+        p: const TextStyle(color: NbColors.textPrimary, fontSize: 13, height: 1.6),
+        h1: const TextStyle(color: NbColors.textPrimary, fontSize: 22, fontWeight: FontWeight.w600),
+        h2: const TextStyle(color: NbColors.textPrimary, fontSize: 18, fontWeight: FontWeight.w600),
+        h3: const TextStyle(color: NbColors.textPrimary, fontSize: 15, fontWeight: FontWeight.w600),
+        code: TextStyle(
+          color: NbColors.textPrimary,
+          backgroundColor: NbColors.surfaceElevated,
+          fontSize: 12,
+          fontFamily: 'monospace',
+        ),
+        codeblockDecoration: BoxDecoration(
+          color: NbColors.surfaceElevated,
+          borderRadius: BorderRadius.circular(NbRadius.sm),
+          border: Border.all(color: NbColors.glassBorder, width: 0.5),
+        ),
+        codeblockPadding: const EdgeInsets.all(12),
+        blockquoteDecoration: BoxDecoration(
+          border: Border(left: BorderSide(color: NbColors.accent, width: 3)),
+        ),
+        blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
+        tableBorder: TableBorder.all(color: NbColors.glassBorder, width: 0.5),
+        tableHead: const TextStyle(color: NbColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 13),
+        tableBody: const TextStyle(color: NbColors.textSecondary, fontSize: 13),
+        tableCellsPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        listBullet: const TextStyle(color: NbColors.textSecondary, fontSize: 13),
+        a: const TextStyle(color: NbColors.accent, decoration: TextDecoration.underline),
+        strong: const TextStyle(color: NbColors.textPrimary, fontWeight: FontWeight.w600),
+        em: const TextStyle(color: NbColors.textPrimary, fontStyle: FontStyle.italic),
+        horizontalRuleDecoration: BoxDecoration(
+          border: Border(top: BorderSide(color: NbColors.glassBorder, width: 0.5)),
+        ),
       ),
     );
   }

@@ -201,7 +201,8 @@ fn test_tools_list_returns_all_tools() {
         "missing show_saved_form"
     );
     assert!(tool_names.contains(&"show_page"), "missing show_page");
-    assert_eq!(tool_names.len(), 7, "expected exactly 7 tools");
+    assert!(tool_names.contains(&"md_to_page"), "missing md_to_page");
+    assert_eq!(tool_names.len(), 8, "expected exactly 8 tools");
 }
 
 #[test]
@@ -356,7 +357,7 @@ fn test_headless_flag() {
     let tools = tools_resp["result"]["tools"]
         .as_array()
         .expect("tools should be array");
-    assert_eq!(tools.len(), 7);
+    assert_eq!(tools.len(), 8);
 }
 
 #[test]
@@ -375,7 +376,7 @@ fn test_headless_env_var() {
     let tools = tools_resp["result"]["tools"]
         .as_array()
         .expect("tools should be array");
-    assert_eq!(tools.len(), 7);
+    assert_eq!(tools.len(), 8);
 }
 
 #[cfg(unix)]
@@ -405,7 +406,7 @@ fn test_broken_flutter_binary_falls_back_to_headless() {
         .expect("tools should be array");
     assert_eq!(
         tools.len(),
-        7,
-        "headless fallback should expose all 7 tools"
+        8,
+        "headless fallback should expose all 8 tools"
     );
 }

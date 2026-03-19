@@ -1,5 +1,6 @@
 //! MCP server definition — tool handlers and protocol integration.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -129,15 +130,28 @@ pub struct ShowFormInput {
 pub struct ShowPageInput {
     /// The page layout tree — array of content, input, and layout nodes.
     ///
-    /// Node types:
+    /// Node types (18):
     /// - `{"type": "markdown", "content": "# Hello"}` — rendered markdown
     /// - `{"type": "text", "content": "plain text"}` — plain text block
     /// - `{"type": "divider"}` — horizontal line
-    /// - `{"type": "spacer"}` — vertical spacing
+    /// - `{"type": "spacer", "props": {"size": "lg"}}` — vertical spacing
     /// - `{"type": "input", "key": "field_name", "field": {JSON Schema field}}` — form input
     /// - `{"type": "section", "title": "Group", "children": [...]}` — titled panel with nested nodes
+    /// - `{"type": "stat", "props": {"label": "Tests", "value": "42", "variant": "success"}}` — metric display
+    /// - `{"type": "progress", "props": {"value": 0.7, "label": "Migration"}}` — progress bar
+    /// - `{"type": "badge", "content": "PASSED", "props": {"variant": "success"}}` — inline badge
+    /// - `{"type": "image", "content": "https://...", "props": {"alt": "diagram"}}` — image
+    /// - `{"type": "alert", "props": {"variant": "warning"}, "children": [...]}` — alert box
+    /// - `{"type": "card", "children": [...]}` — card panel
+    /// - `{"type": "collapse", "title": "Details", "props": {"expanded": true}, "children": [...]}` — collapsible
+    /// - `{"type": "hero", "children": [...]}` — hero banner
+    /// - `{"type": "row", "children": [...]}` — horizontal layout (children are col nodes)
+    /// - `{"type": "col", "children": [...]}` — column within a row
+    /// - `{"type": "tabs", "children": [...]}` — tab container (children are tab nodes)
+    /// - `{"type": "tab", "title": "Overview", "children": [...]}` — tab panel
     #[schemars(
-        description = "Array of page nodes. Each node has a 'type' (markdown, text, divider, spacer, input, section) and type-specific fields"
+        description = "Array of page nodes. 18 types: markdown, text, divider, spacer, input, section, \
+        stat, progress, badge, image, alert, card, collapse, hero, row, col, tabs, tab"
     )]
     pub children: Value,
 
@@ -263,6 +277,746 @@ pub struct ShowSavedFormInput {
     /// Pre-filled values for form fields
     #[schemars(description = "Pre-fill values as {field_name: value}")]
     pub prefill: Option<Value>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct MdToPageInput {
+    /// Markdown content to render as a native page.
+    ///
+    /// Headings become titled section panels:
+    /// - `# Title` → top-level section
+    /// - `## Subtitle` → nested section
+    ///
+    /// Horizontal rules (`---`) become dividers.
+    /// Fenced code blocks with language `niobium` are parsed as inline JSON nodes
+    /// (input fields, sections, etc.) — enabling interactive forms within markdown.
+    ///
+    /// HTML comments `<!-- nb:xxx -->` embed rich components:
+    /// - Self-closing: `<!-- nb:stat label="Tests" value="42" -->`, `<!-- nb:progress value="0.7" -->`, `<!-- nb:gap lg -->`
+    /// - Inline content: `<!-- nb:badge variant="success" -->PASSED<!-- nb:end -->`, `<!-- nb:image -->url<!-- nb:end -->`
+    /// - Containers: `<!-- nb:alert variant="warning" -->...<!-- nb:end -->`, `<!-- nb:card -->`, `<!-- nb:collapse title="Details" expanded -->`, `<!-- nb:hero -->`, `<!-- nb:row -->`, `<!-- nb:tabs -->`
+    /// - Row columns: `<!-- nb:col -->` inside `<!-- nb:row -->`
+    /// - Tab panels: `<!-- nb:tab title="Overview" -->` inside `<!-- nb:tabs -->`
+    ///
+    /// Everything else renders as rich markdown content inside the current section.
+    #[schemars(
+        description = "Markdown text. # headings become titled panels, --- become dividers, \
+        ```niobium blocks embed interactive JSON components, \
+        <!-- nb:xxx --> HTML comments embed rich components (stat, progress, badge, image, alert, card, collapse, hero, row/col, tabs/tab, gap)"
+    )]
+    pub markdown: String,
+
+    /// Page title
+    #[schemars(description = "Title for the page window")]
+    pub title: Option<String>,
+
+    /// Window width — preset mode or pixel value
+    #[schemars(
+        description = "Window width: \"narrow\" (420) / \"normal\" (580) / \"wide\" (800) / \"full\" (1100) or pixel value"
+    )]
+    pub width: Option<Dimension>,
+
+    /// Window height — preset mode or pixel value
+    #[schemars(
+        description = "Window height: \"short\" (400) / \"normal\" (720) / \"tall\" (900) / \"full\" (1080) or pixel value"
+    )]
+    pub height: Option<Dimension>,
+
+    /// Field density — controls spacing
+    #[schemars(description = "Field density: \"compact\" / \"normal\" / \"comfortable\"")]
+    pub density: Option<String>,
+
+    /// Enable/disable stagger animations
+    #[schemars(description = "Enable/disable stagger animations (default: true)")]
+    pub animate: Option<bool>,
+
+    /// Accent color
+    #[schemars(
+        description = "Accent color: \"teal\" / \"blue\" / \"purple\" / \"amber\" / \"red\" / \"green\" or \"#RRGGBB\""
+    )]
+    pub accent: Option<String>,
+}
+
+// ── nb: comment parsing helpers ───────────────────────────────────────────
+
+/// Parse `key="value"` pairs and bare flags from an nb: comment attribute string.
+///
+/// Returns (props map, optional title extracted from props).
+/// Numeric strings are parsed as numbers. Bare words become `true`.
+fn parse_nb_attrs(attr_str: &str) -> (HashMap<String, Value>, Option<String>) {
+    let mut props: HashMap<String, Value> = HashMap::new();
+    let mut rest = attr_str.trim();
+
+    while !rest.is_empty() {
+        // Skip whitespace
+        rest = rest.trim_start();
+        if rest.is_empty() {
+            break;
+        }
+
+        // Try key="value"
+        if let Some(eq_pos) = rest.find('=') {
+            let before_eq = &rest[..eq_pos];
+            // Only treat as key=value if there's no space before the '='
+            if !before_eq.contains(' ') {
+                let key = before_eq.trim();
+                let after_eq = &rest[eq_pos + 1..];
+                if let Some(quoted) = after_eq.strip_prefix('"')
+                    && let Some(end_quote) = quoted.find('"')
+                {
+                    let val_str = &quoted[..end_quote];
+                    let value = try_parse_number(val_str);
+                    props.insert(key.to_string(), value);
+                    rest = &quoted[end_quote + 1..];
+                    continue;
+                }
+            }
+        }
+
+        // Bare flag (word without '=' before next space)
+        let end = rest.find(' ').unwrap_or(rest.len());
+        let flag = &rest[..end];
+        if !flag.is_empty() {
+            props.insert(flag.to_string(), Value::Bool(true));
+        }
+        rest = &rest[end..];
+    }
+
+    let title = props.remove("title").and_then(|v| match v {
+        Value::String(s) => Some(s),
+        _ => None,
+    });
+
+    (props, title)
+}
+
+/// Try to parse a string as a number, fall back to string.
+fn try_parse_number(s: &str) -> Value {
+    if let Ok(i) = s.parse::<i64>() {
+        return Value::Number(i.into());
+    }
+    if let Ok(f) = s.parse::<f64>()
+        && let Some(n) = serde_json::Number::from_f64(f)
+    {
+        return Value::Number(n);
+    }
+    Value::String(s.to_string())
+}
+
+/// Parse an `<!-- nb:xxx ... -->` comment from a line.
+///
+/// Returns `Some((tag, attr_str, rest_of_line))` where:
+/// - tag is e.g. "alert", "stat", "end", "col", "tab"
+/// - attr_str is the attributes inside the comment
+/// - rest_of_line is any text after `-->` (used for inline badge/image content)
+fn parse_nb_comment(line: &str) -> Option<(&str, &str, &str)> {
+    let trimmed = line.trim();
+    let after_open = trimmed.strip_prefix("<!--")?;
+    // Find the closing -->
+    let close_pos = after_open.find("-->")?;
+    let inner = after_open[..close_pos].trim();
+    let rest_after = after_open[close_pos + 3..].trim();
+    let body = inner.strip_prefix("nb:")?;
+    let body = body.trim();
+    if body.is_empty() {
+        return None;
+    }
+    // Split into tag and rest
+    let (tag, attrs) = match body.find(|c: char| c.is_whitespace()) {
+        Some(pos) => (&body[..pos], body[pos..].trim()),
+        None => (body, ""),
+    };
+    Some((tag, attrs, rest_after))
+}
+
+/// Which nb: tags are self-closing (no children, no nb:end needed).
+fn is_self_closing_nb(tag: &str) -> bool {
+    matches!(tag, "stat" | "progress" | "gap")
+}
+
+/// Which nb: tags need content between them and nb:end (inline content, not children).
+fn is_inline_content_nb(tag: &str) -> bool {
+    matches!(tag, "badge" | "image")
+}
+
+/// Which nb: tags act as sibling separators within their parent container.
+fn is_sibling_separator_nb(tag: &str) -> bool {
+    matches!(tag, "col" | "tab")
+}
+
+// ── nb: container stack frame ────────────────────────────────────────────
+
+/// A frame on the nb: container stack, tracking an open container element.
+struct NbFrame {
+    /// The nb: tag name (e.g. "alert", "card", "row", "tabs")
+    #[allow(dead_code)]
+    tag: String,
+    /// The JSON node type to emit (usually same as tag)
+    node_type: String,
+    /// Parsed props (variant, etc.)
+    props: HashMap<String, Value>,
+    /// Optional title
+    title: Option<String>,
+    /// Accumulated children nodes
+    children: Vec<Value>,
+    /// For sibling-separator parents (row/tabs): the current sibling tag and its children
+    #[allow(clippy::type_complexity)]
+    current_sibling: Option<(String, HashMap<String, Value>, Option<String>, Vec<Value>)>,
+}
+
+impl NbFrame {
+    fn new(
+        tag: &str,
+        node_type: &str,
+        props: HashMap<String, Value>,
+        title: Option<String>,
+    ) -> Self {
+        Self {
+            tag: tag.to_string(),
+            node_type: node_type.to_string(),
+            props,
+            title,
+            children: Vec::new(),
+            current_sibling: None,
+        }
+    }
+
+    /// Flush the current sibling (col/tab) into children.
+    fn flush_sibling(&mut self) {
+        if let Some((sib_tag, sib_props, sib_title, sib_children)) = self.current_sibling.take()
+            && (!sib_children.is_empty() || sib_title.is_some())
+        {
+            let mut node = serde_json::json!({
+                "type": sib_tag,
+                "children": sib_children,
+            });
+            if let Some(t) = sib_title {
+                node["title"] = Value::String(t);
+            }
+            if !sib_props.is_empty() {
+                node["props"] = serde_json::to_value(&sib_props).unwrap_or_default();
+            }
+            self.children.push(node);
+        }
+    }
+
+    /// Build the final JSON node for this container.
+    fn into_node(mut self) -> Value {
+        self.flush_sibling();
+        let mut node = serde_json::json!({
+            "type": self.node_type,
+            "children": self.children,
+        });
+        if let Some(t) = self.title {
+            node["title"] = Value::String(t);
+        }
+        if !self.props.is_empty() {
+            node["props"] = serde_json::to_value(&self.props).unwrap_or_default();
+        }
+        node
+    }
+
+    /// Push a node into the current sibling if one is open, otherwise into children.
+    fn push(&mut self, node: Value) {
+        if let Some((_, _, _, ref mut sib_children)) = self.current_sibling {
+            sib_children.push(node);
+        } else {
+            self.children.push(node);
+        }
+    }
+}
+
+/// Parse markdown into a page node tree for show_page.
+///
+/// Supported syntax:
+/// - `# Heading` → section with title (top-level)
+/// - `## Heading` → section with title (nested inside current h1 section)
+/// - `---` / `***` / `___` → divider
+/// - ` ```niobium ` fenced blocks → inline JSON nodes
+/// - `<!-- nb:xxx ... -->` HTML comments → rich component nodes
+/// - Everything else → markdown content node
+fn md_to_page_nodes(markdown: &str) -> Value {
+    let mut root: Vec<Value> = Vec::new();
+    let mut h1_title: Option<String> = None;
+    let mut h1_children: Vec<Value> = Vec::new();
+    let mut h2_title: Option<String> = None;
+    let mut h2_children: Vec<Value> = Vec::new();
+    let mut buf = String::new();
+
+    // Stack of open nb: containers
+    let mut nb_stack: Vec<NbFrame> = Vec::new();
+    // For inline-content nb: tags (badge, image): accumulates text until nb:end
+    let mut inline_nb: Option<(String, HashMap<String, Value>)> = None;
+    let mut inline_buf = String::new();
+
+    fn flush_buf(buf: &mut String) -> Option<Value> {
+        let trimmed = buf.trim();
+        if trimmed.is_empty() {
+            buf.clear();
+            return None;
+        }
+        let node = serde_json::json!({"type": "markdown", "content": trimmed});
+        buf.clear();
+        Some(node)
+    }
+
+    /// Push a node into the deepest open context (nb stack, h2, h1, or root).
+    fn push_node(
+        node: Value,
+        nb_stack: &mut [NbFrame],
+        h2_title: &Option<String>,
+        h2_children: &mut Vec<Value>,
+        h1_title: &Option<String>,
+        h1_children: &mut Vec<Value>,
+        root: &mut Vec<Value>,
+    ) {
+        if let Some(frame) = nb_stack.last_mut() {
+            frame.push(node);
+        } else if h2_title.is_some() {
+            h2_children.push(node);
+        } else if h1_title.is_some() {
+            h1_children.push(node);
+        } else {
+            root.push(node);
+        }
+    }
+
+    /// Close h2 section, pushing it into h1 or root.
+    fn close_h2(
+        h2_title: &mut Option<String>,
+        h2_children: &mut Vec<Value>,
+        buf: &mut String,
+        h1_title: &Option<String>,
+        h1_children: &mut Vec<Value>,
+        root: &mut Vec<Value>,
+    ) {
+        if let Some(node) = flush_buf(buf) {
+            if h2_title.is_some() {
+                h2_children.push(node);
+            } else if h1_title.is_some() {
+                h1_children.push(node);
+            } else {
+                root.push(node);
+            }
+        }
+        if let Some(title) = h2_title.take() {
+            let section = serde_json::json!({
+                "type": "section",
+                "title": title,
+                "children": std::mem::take(h2_children),
+            });
+            if h1_title.is_some() {
+                h1_children.push(section);
+            } else {
+                root.push(section);
+            }
+        }
+    }
+
+    fn is_hr(line: &str) -> bool {
+        line.len() >= 3
+            && (line.starts_with("---") || line.starts_with("***") || line.starts_with("___"))
+            && line
+                .chars()
+                .all(|c| c == '-' || c == '*' || c == '_' || c == ' ')
+    }
+
+    // Track fenced code blocks: None = not in a block, Some(true) = niobium block, Some(false) = regular code
+    let mut in_fence: Option<bool> = None;
+    let mut nb_buf = String::new();
+
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+
+        // If we're accumulating inline content for badge/image, collect until nb:end
+        if inline_nb.is_some() {
+            if let Some(("end", _, _)) = parse_nb_comment(trimmed) {
+                let (tag, props) = inline_nb.take().unwrap();
+                let content = inline_buf.trim().to_string();
+                inline_buf.clear();
+                let mut node = serde_json::json!({
+                    "type": tag,
+                    "content": content,
+                });
+                if !props.is_empty() {
+                    node["props"] = serde_json::to_value(&props).unwrap_or_default();
+                }
+                // Flush buf before pushing
+                if let Some(md_node) = flush_buf(&mut buf) {
+                    push_node(
+                        md_node,
+                        &mut nb_stack,
+                        &h2_title,
+                        &mut h2_children,
+                        &h1_title,
+                        &mut h1_children,
+                        &mut root,
+                    );
+                }
+                push_node(
+                    node,
+                    &mut nb_stack,
+                    &h2_title,
+                    &mut h2_children,
+                    &h1_title,
+                    &mut h1_children,
+                    &mut root,
+                );
+            } else {
+                if !inline_buf.is_empty() {
+                    inline_buf.push('\n');
+                }
+                inline_buf.push_str(trimmed);
+            }
+            continue;
+        }
+
+        // Fenced code block handling
+        if trimmed.starts_with("```") {
+            match in_fence {
+                None => {
+                    // Opening fence
+                    let lang = trimmed.trim_start_matches('`').trim();
+                    if lang == "niobium" || lang.starts_with("niobium ") {
+                        // Flush markdown before the niobium block
+                        if let Some(node) = flush_buf(&mut buf) {
+                            push_node(
+                                node,
+                                &mut nb_stack,
+                                &h2_title,
+                                &mut h2_children,
+                                &h1_title,
+                                &mut h1_children,
+                                &mut root,
+                            );
+                        }
+                        in_fence = Some(true);
+                        nb_buf.clear();
+                    } else {
+                        // Regular code block — pass through as markdown
+                        in_fence = Some(false);
+                        buf.push_str(line);
+                        buf.push('\n');
+                    }
+                    continue;
+                }
+                Some(true) => {
+                    // Closing niobium fence — parse JSON and inject node(s)
+                    in_fence = None;
+                    let json_str = nb_buf.trim();
+                    if !json_str.is_empty()
+                        && let Ok(val) = serde_json::from_str::<Value>(json_str)
+                    {
+                        // Support both single node and array of nodes
+                        if let Some(arr) = val.as_array() {
+                            for node in arr {
+                                push_node(
+                                    node.clone(),
+                                    &mut nb_stack,
+                                    &h2_title,
+                                    &mut h2_children,
+                                    &h1_title,
+                                    &mut h1_children,
+                                    &mut root,
+                                );
+                            }
+                        } else {
+                            push_node(
+                                val,
+                                &mut nb_stack,
+                                &h2_title,
+                                &mut h2_children,
+                                &h1_title,
+                                &mut h1_children,
+                                &mut root,
+                            );
+                        }
+                    }
+                    nb_buf.clear();
+                    continue;
+                }
+                Some(false) => {
+                    // Closing regular code fence — pass through
+                    in_fence = None;
+                    buf.push_str(line);
+                    buf.push('\n');
+                    continue;
+                }
+            }
+        }
+
+        // Inside a fenced block
+        if let Some(is_nb) = in_fence {
+            if is_nb {
+                nb_buf.push_str(line);
+                nb_buf.push('\n');
+            } else {
+                buf.push_str(line);
+                buf.push('\n');
+            }
+            continue;
+        }
+
+        // ── nb: HTML comment handling ────────────────────────────────────
+        if let Some((tag, attr_str, rest_of_line)) = parse_nb_comment(trimmed) {
+            // Flush pending markdown buffer before any nb: directive
+            if let Some(md_node) = flush_buf(&mut buf) {
+                push_node(
+                    md_node,
+                    &mut nb_stack,
+                    &h2_title,
+                    &mut h2_children,
+                    &h1_title,
+                    &mut h1_children,
+                    &mut root,
+                );
+            }
+
+            if tag == "end" {
+                // Close the innermost nb: container
+                if let Some(frame) = nb_stack.pop() {
+                    let node = frame.into_node();
+                    push_node(
+                        node,
+                        &mut nb_stack,
+                        &h2_title,
+                        &mut h2_children,
+                        &h1_title,
+                        &mut h1_children,
+                        &mut root,
+                    );
+                }
+                continue;
+            }
+
+            if tag == "gap" {
+                // <!-- nb:gap lg --> → spacer with size prop
+                let size = if attr_str.is_empty() {
+                    "md".to_string()
+                } else {
+                    // First bare word is the size
+                    attr_str
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("md")
+                        .to_string()
+                };
+                let node = serde_json::json!({
+                    "type": "spacer",
+                    "props": { "size": size },
+                });
+                push_node(
+                    node,
+                    &mut nb_stack,
+                    &h2_title,
+                    &mut h2_children,
+                    &h1_title,
+                    &mut h1_children,
+                    &mut root,
+                );
+                continue;
+            }
+
+            let (props, title) = parse_nb_attrs(attr_str);
+
+            if is_self_closing_nb(tag) {
+                // Self-closing: stat, progress
+                let mut node = serde_json::json!({ "type": tag });
+                if !props.is_empty() {
+                    node["props"] = serde_json::to_value(&props).unwrap_or_default();
+                }
+                push_node(
+                    node,
+                    &mut nb_stack,
+                    &h2_title,
+                    &mut h2_children,
+                    &h1_title,
+                    &mut h1_children,
+                    &mut root,
+                );
+                continue;
+            }
+
+            if is_inline_content_nb(tag) {
+                // Inline content: badge, image
+                // Check if content + nb:end are on the same line
+                if let Some(end_pos) = rest_of_line.find("<!-- nb:end -->") {
+                    let content = rest_of_line[..end_pos].trim().to_string();
+                    let mut node = serde_json::json!({
+                        "type": tag,
+                        "content": content,
+                    });
+                    if !props.is_empty() {
+                        node["props"] = serde_json::to_value(&props).unwrap_or_default();
+                    }
+                    push_node(
+                        node,
+                        &mut nb_stack,
+                        &h2_title,
+                        &mut h2_children,
+                        &h1_title,
+                        &mut h1_children,
+                        &mut root,
+                    );
+                } else {
+                    // Multi-line: collect text until nb:end
+                    inline_nb = Some((tag.to_string(), props));
+                    inline_buf.clear();
+                    if !rest_of_line.is_empty() {
+                        inline_buf.push_str(rest_of_line);
+                    }
+                }
+                continue;
+            }
+
+            if is_sibling_separator_nb(tag) {
+                // col/tab — flush previous sibling in the parent frame, start new one
+                if let Some(frame) = nb_stack.last_mut() {
+                    // Flush any pending markdown into the current sibling
+                    if let Some(md_node) = flush_buf(&mut buf) {
+                        frame.push(md_node);
+                    }
+                    frame.flush_sibling();
+                    frame.current_sibling = Some((tag.to_string(), props, title, Vec::new()));
+                }
+                continue;
+            }
+
+            // Container tags: alert, card, collapse, hero, row, tabs, etc.
+            let frame = NbFrame::new(tag, tag, props, title);
+            nb_stack.push(frame);
+            continue;
+        }
+
+        // Skip nb: handling when inside an nb: container — headings/hr still parsed
+        // but nodes are pushed into the nb: stack frame instead of h1/h2/root.
+
+        if is_hr(trimmed) {
+            if let Some(node) = flush_buf(&mut buf) {
+                push_node(
+                    node,
+                    &mut nb_stack,
+                    &h2_title,
+                    &mut h2_children,
+                    &h1_title,
+                    &mut h1_children,
+                    &mut root,
+                );
+            }
+            let divider = serde_json::json!({"type": "divider"});
+            push_node(
+                divider,
+                &mut nb_stack,
+                &h2_title,
+                &mut h2_children,
+                &h1_title,
+                &mut h1_children,
+                &mut root,
+            );
+            continue;
+        }
+
+        // Only process headings when NOT inside an nb: container
+        if nb_stack.is_empty() {
+            // H1 heading — close everything and start fresh section
+            if let Some(title) = trimmed.strip_prefix("# ") {
+                close_h2(
+                    &mut h2_title,
+                    &mut h2_children,
+                    &mut buf,
+                    &h1_title,
+                    &mut h1_children,
+                    &mut root,
+                );
+                if let Some(node) = flush_buf(&mut buf) {
+                    if h1_title.is_some() {
+                        h1_children.push(node);
+                    } else {
+                        root.push(node);
+                    }
+                }
+                if let Some(t) = h1_title.take() {
+                    root.push(serde_json::json!({
+                        "type": "section",
+                        "title": t,
+                        "children": std::mem::take(&mut h1_children),
+                    }));
+                }
+                h1_title = Some(title.to_string());
+                continue;
+            }
+
+            // H2 heading — close current h2 and start new one
+            if let Some(title) = trimmed.strip_prefix("## ") {
+                close_h2(
+                    &mut h2_title,
+                    &mut h2_children,
+                    &mut buf,
+                    &h1_title,
+                    &mut h1_children,
+                    &mut root,
+                );
+                h2_title = Some(title.to_string());
+                continue;
+            }
+        }
+
+        buf.push_str(line);
+        buf.push('\n');
+    }
+
+    // Flush any remaining markdown buffer into the nb stack if open
+    if let Some(md_node) = flush_buf(&mut buf) {
+        push_node(
+            md_node,
+            &mut nb_stack,
+            &h2_title,
+            &mut h2_children,
+            &h1_title,
+            &mut h1_children,
+            &mut root,
+        );
+    }
+
+    // Close any unclosed nb: containers (graceful recovery)
+    while let Some(frame) = nb_stack.pop() {
+        let node = frame.into_node();
+        push_node(
+            node,
+            &mut nb_stack,
+            &h2_title,
+            &mut h2_children,
+            &h1_title,
+            &mut h1_children,
+            &mut root,
+        );
+    }
+
+    // Close remaining h2/h1
+    close_h2(
+        &mut h2_title,
+        &mut h2_children,
+        &mut buf,
+        &h1_title,
+        &mut h1_children,
+        &mut root,
+    );
+    if let Some(node) = flush_buf(&mut buf) {
+        if h1_title.is_some() {
+            h1_children.push(node);
+        } else {
+            root.push(node);
+        }
+    }
+    if let Some(t) = h1_title.take() {
+        root.push(serde_json::json!({
+            "type": "section",
+            "title": t,
+            "children": h1_children,
+        }));
+    }
+
+    Value::Array(root)
 }
 
 // ── MCP Server ────────────────────────────────────────────────────────────
@@ -537,6 +1291,63 @@ impl NiobiumServer {
     }
 
     #[tool(
+        description = "Render markdown as a native paneled page. Headings become titled section panels \
+        (# = top-level, ## = nested), horizontal rules (---) become dividers, everything else renders \
+        as rich markdown content. Embed components via ```niobium JSON blocks or <!-- nb:xxx --> HTML comments: \
+        self-closing (stat, progress, gap), inline-content (badge, image), and containers \
+        (alert, card, collapse, hero, row/col, tabs/tab). \
+        If the page has inputs, returns collected values. Otherwise returns {dismissed: true} when closed."
+    )]
+    async fn md_to_page(
+        &self,
+        Parameters(input): Parameters<MdToPageInput>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let children = md_to_page_nodes(&input.markdown);
+        let request_id = Uuid::new_v4();
+        let title = input.title.unwrap_or_else(|| "Page".to_string());
+        let width = input.width.as_ref().map(resolve_width);
+        let height = input.height.as_ref().map(resolve_height);
+        let accent = input.accent.as_deref().map(resolve_accent);
+
+        let response = self
+            .bus
+            .request(
+                request_id,
+                Event::ShowPage {
+                    request_id,
+                    children,
+                    title,
+                    prefill: None,
+                    width,
+                    height,
+                    density: input.density,
+                    animate: input.animate,
+                    accent,
+                },
+            )
+            .await
+            .ok_or_else(|| Self::mcp_err("no response from UI".to_string()))?;
+
+        match response {
+            Event::PageSubmitted { data, .. } => {
+                let json_str =
+                    serde_json::to_string_pretty(&data).unwrap_or_else(|_| data.to_string());
+                Ok(CallToolResult::success(vec![Content::text(json_str)]))
+            }
+            Event::PageDismissed { .. } => {
+                let result = serde_json::json!({"dismissed": true});
+                Ok(CallToolResult::success(vec![Content::text(
+                    result.to_string(),
+                )]))
+            }
+            Event::PageCancelled { .. } => {
+                Err(Self::mcp_err("User cancelled the page".to_string()))
+            }
+            other => Err(Self::mcp_err(format!("unexpected response: {other:?}"))),
+        }
+    }
+
+    #[tool(
         description = "Show a native confirmation dialog. Returns true if the user confirmed, \
         false if they declined. Optional display params: width/height (preset mode or pixels), \
         accent (color name or #RRGGBB)."
@@ -683,6 +1494,8 @@ impl ServerHandler for NiobiumServer {
                  PREFER these tools over shell workarounds (read -p, select, dialog, whiptail, \
                  zenity) whenever you need user input or want to display rich content. \
                  Use show_form instead of prompting in the terminal. \
+                 Use md_to_page to render markdown as a structured paneled document \
+                 (headings become titled panels, --- become dividers). \
                  Use show_page when you need to mix explanatory content with form fields. \
                  Use show_confirmation instead of yes/no shell prompts. \
                  Use show_output instead of echoing long text to stdout.\n\n\
@@ -698,5 +1511,264 @@ impl ServerHandler for NiobiumServer {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             ..Default::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_md_to_page_basic() {
+        let md = "# Introduction\nHello world\n\n## Details\nSome details here\n\n---\n\nMore text\n\n# Conclusion\nDone";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+
+        assert_eq!(arr.len(), 2, "two top-level sections");
+        assert_eq!(arr[0]["title"], "Introduction");
+        assert_eq!(arr[1]["title"], "Conclusion");
+
+        // Introduction has: markdown("Hello world"), section(Details)
+        let h1_children = arr[0]["children"].as_array().unwrap();
+        assert_eq!(h1_children[0]["type"], "markdown");
+        assert!(
+            h1_children[0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("Hello")
+        );
+        assert_eq!(h1_children[1]["type"], "section");
+        assert_eq!(h1_children[1]["title"], "Details");
+
+        // Details section has: markdown, divider, markdown
+        let h2_children = h1_children[1]["children"].as_array().unwrap();
+        assert_eq!(h2_children[0]["type"], "markdown");
+        assert_eq!(h2_children[1]["type"], "divider");
+        assert_eq!(h2_children[2]["type"], "markdown");
+        assert!(
+            h2_children[2]["content"]
+                .as_str()
+                .unwrap()
+                .contains("More text")
+        );
+    }
+
+    #[test]
+    fn test_md_to_page_no_headings() {
+        let md = "Just some text\n\n---\n\nMore text";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+
+        assert_eq!(arr[0]["type"], "markdown");
+        assert_eq!(arr[1]["type"], "divider");
+        assert_eq!(arr[2]["type"], "markdown");
+    }
+
+    #[test]
+    fn test_md_to_page_multiple_h1() {
+        let md = "# First\nContent 1\n# Second\nContent 2";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["title"], "First");
+        assert_eq!(arr[1]["title"], "Second");
+    }
+
+    #[test]
+    fn test_md_to_page_niobium_blocks() {
+        let md = "# Review\n\nRate this:\n\n```niobium\n{\"type\": \"input\", \"key\": \"rating\", \"field\": {\"type\": \"string\", \"enum\": [\"Good\", \"Bad\"]}}\n```\n\nThanks!";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+
+        assert_eq!(arr.len(), 1);
+        let children = arr[0]["children"].as_array().unwrap();
+
+        // markdown("Rate this:"), input node, markdown("Thanks!")
+        assert_eq!(children[0]["type"], "markdown");
+        assert!(children[0]["content"].as_str().unwrap().contains("Rate"));
+        assert_eq!(children[1]["type"], "input");
+        assert_eq!(children[1]["key"], "rating");
+        assert_eq!(children[2]["type"], "markdown");
+        assert!(children[2]["content"].as_str().unwrap().contains("Thanks"));
+    }
+
+    #[test]
+    fn test_md_to_page_regular_code_blocks_pass_through() {
+        let md = "Some code:\n\n```python\ndef foo():\n    pass\n```\n\nDone.";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+
+        // Everything is one markdown node (code block passes through)
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["type"], "markdown");
+        let content = arr[0]["content"].as_str().unwrap();
+        assert!(content.contains("```python"));
+        assert!(content.contains("def foo"));
+    }
+
+    // ── nb: comment tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_nb_attrs_basic() {
+        let (props, title) = parse_nb_attrs(r#"label="Tests" value="42" variant="success""#);
+        assert_eq!(props.get("label").unwrap(), "Tests");
+        assert_eq!(props.get("value").unwrap(), 42); // numeric strings become numbers
+        assert_eq!(props.get("variant").unwrap(), "success");
+        assert!(title.is_none());
+    }
+
+    #[test]
+    fn test_parse_nb_attrs_with_title() {
+        let (props, title) = parse_nb_attrs(r#"title="My Card" variant="info""#);
+        assert_eq!(title.unwrap(), "My Card");
+        assert_eq!(props.get("variant").unwrap(), "info");
+    }
+
+    #[test]
+    fn test_parse_nb_attrs_bare_flag() {
+        let (props, _title) = parse_nb_attrs(r#"title="Details" expanded"#);
+        assert_eq!(props.get("expanded").unwrap(), true);
+    }
+
+    #[test]
+    fn test_parse_nb_attrs_numeric() {
+        let (props, _) = parse_nb_attrs(r#"value="0.7" height="300""#);
+        assert_eq!(props.get("value").unwrap(), 0.7);
+        assert_eq!(props.get("height").unwrap(), 300);
+    }
+
+    #[test]
+    fn test_md_to_page_nb_alert() {
+        let md = "<!-- nb:alert variant=\"warning\" -->\nWatch out!\n<!-- nb:end -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["type"], "alert");
+        assert_eq!(arr[0]["props"]["variant"], "warning");
+        let children = arr[0]["children"].as_array().unwrap();
+        assert_eq!(children[0]["type"], "markdown");
+    }
+
+    #[test]
+    fn test_md_to_page_nb_stat() {
+        let md = "<!-- nb:stat label=\"Tests\" value=\"42\" variant=\"success\" -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "stat");
+        assert_eq!(arr[0]["props"]["label"], "Tests");
+        assert_eq!(arr[0]["props"]["value"], 42); // numeric strings parsed as numbers
+    }
+
+    #[test]
+    fn test_md_to_page_nb_row_with_cols() {
+        let md = "<!-- nb:row -->\n<!-- nb:col -->\nLeft content\n<!-- nb:col -->\nRight content\n<!-- nb:end -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "row");
+        let children = arr[0]["children"].as_array().unwrap();
+        assert_eq!(children.len(), 2);
+    }
+
+    #[test]
+    fn test_md_to_page_nb_collapse() {
+        let md = "<!-- nb:collapse title=\"Details\" expanded -->\nHidden content\n<!-- nb:end -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "collapse");
+        assert_eq!(arr[0]["title"], "Details");
+        assert_eq!(arr[0]["props"]["expanded"], true);
+    }
+
+    #[test]
+    fn test_md_to_page_nb_badge() {
+        let md = "<!-- nb:badge variant=\"success\" -->PASSED<!-- nb:end -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "badge");
+        assert_eq!(arr[0]["content"], "PASSED");
+        assert_eq!(arr[0]["props"]["variant"], "success");
+    }
+
+    #[test]
+    fn test_md_to_page_nb_image() {
+        let md = "<!-- nb:image alt=\"diagram\" height=\"300\" -->https://example.com/img.png<!-- nb:end -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "image");
+        assert_eq!(arr[0]["content"], "https://example.com/img.png");
+        assert_eq!(arr[0]["props"]["alt"], "diagram");
+        assert_eq!(arr[0]["props"]["height"], 300);
+    }
+
+    #[test]
+    fn test_md_to_page_nb_gap() {
+        let md = "Hello\n<!-- nb:gap lg -->\nWorld";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0]["type"], "markdown");
+        assert_eq!(arr[1]["type"], "spacer");
+        assert_eq!(arr[1]["props"]["size"], "lg");
+        assert_eq!(arr[2]["type"], "markdown");
+    }
+
+    #[test]
+    fn test_md_to_page_nb_progress() {
+        let md = "<!-- nb:progress value=\"0.7\" label=\"Migration\" detail=\"7/10\" -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "progress");
+        assert_eq!(arr[0]["props"]["value"], 0.7);
+        assert_eq!(arr[0]["props"]["label"], "Migration");
+        assert_eq!(arr[0]["props"]["detail"], "7/10");
+    }
+
+    #[test]
+    fn test_md_to_page_nb_tabs() {
+        let md = "<!-- nb:tabs -->\n<!-- nb:tab title=\"Overview\" -->\nOverview content\n<!-- nb:tab title=\"Details\" -->\nDetail content\n<!-- nb:end -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "tabs");
+        let children = arr[0]["children"].as_array().unwrap();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0]["type"], "tab");
+        assert_eq!(children[0]["title"], "Overview");
+        assert_eq!(children[1]["type"], "tab");
+        assert_eq!(children[1]["title"], "Details");
+    }
+
+    #[test]
+    fn test_md_to_page_nb_card_with_title() {
+        let md = "<!-- nb:card title=\"My Card\" -->\nCard content\n<!-- nb:end -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "card");
+        assert_eq!(arr[0]["title"], "My Card");
+        let children = arr[0]["children"].as_array().unwrap();
+        assert_eq!(children[0]["type"], "markdown");
+    }
+
+    #[test]
+    fn test_md_to_page_nb_nested_in_section() {
+        let md = "# Report\n<!-- nb:stat label=\"Score\" value=\"95\" -->\nSummary text";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "section");
+        assert_eq!(arr[0]["title"], "Report");
+        let children = arr[0]["children"].as_array().unwrap();
+        assert_eq!(children[0]["type"], "stat");
+        assert_eq!(children[1]["type"], "markdown");
+    }
+
+    #[test]
+    fn test_md_to_page_nb_hero() {
+        let md = "<!-- nb:hero -->\n# Welcome\nThis is a hero section.\n<!-- nb:end -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "hero");
+        let children = arr[0]["children"].as_array().unwrap();
+        // Inside hero, # heading is treated as markdown (not a section)
+        assert_eq!(children[0]["type"], "markdown");
     }
 }
