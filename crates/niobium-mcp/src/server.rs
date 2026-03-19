@@ -265,6 +265,234 @@ pub struct ShowSavedFormInput {
     pub prefill: Option<Value>,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct MdToPageInput {
+    /// Markdown content to render as a native page.
+    ///
+    /// Headings become titled section panels:
+    /// - `# Title` → top-level section
+    /// - `## Subtitle` → nested section
+    ///
+    /// Horizontal rules (`---`) become dividers.
+    /// Everything else renders as rich markdown content inside the current section.
+    #[schemars(
+        description = "Markdown text. # headings become titled panels, --- become dividers"
+    )]
+    pub markdown: String,
+
+    /// Page title
+    #[schemars(description = "Title for the page window")]
+    pub title: Option<String>,
+
+    /// Window width — preset mode or pixel value
+    #[schemars(
+        description = "Window width: \"narrow\" (420) / \"normal\" (580) / \"wide\" (800) / \"full\" (1100) or pixel value"
+    )]
+    pub width: Option<Dimension>,
+
+    /// Window height — preset mode or pixel value
+    #[schemars(
+        description = "Window height: \"short\" (400) / \"normal\" (720) / \"tall\" (900) / \"full\" (1080) or pixel value"
+    )]
+    pub height: Option<Dimension>,
+
+    /// Field density — controls spacing
+    #[schemars(description = "Field density: \"compact\" / \"normal\" / \"comfortable\"")]
+    pub density: Option<String>,
+
+    /// Enable/disable stagger animations
+    #[schemars(description = "Enable/disable stagger animations (default: true)")]
+    pub animate: Option<bool>,
+
+    /// Accent color
+    #[schemars(
+        description = "Accent color: \"teal\" / \"blue\" / \"purple\" / \"amber\" / \"red\" / \"green\" or \"#RRGGBB\""
+    )]
+    pub accent: Option<String>,
+}
+
+/// Parse markdown into a page node tree for show_page.
+///
+/// - `# Heading` → section with title (top-level)
+/// - `## Heading` → section with title (nested inside current h1 section)
+/// - `---` / `***` / `___` → divider
+/// - Everything else → markdown content node
+fn md_to_page_nodes(markdown: &str) -> Value {
+    let mut root: Vec<Value> = Vec::new();
+    let mut h1_title: Option<String> = None;
+    let mut h1_children: Vec<Value> = Vec::new();
+    let mut h2_title: Option<String> = None;
+    let mut h2_children: Vec<Value> = Vec::new();
+    let mut buf = String::new();
+
+    fn flush_buf(buf: &mut String) -> Option<Value> {
+        let trimmed = buf.trim();
+        if trimmed.is_empty() {
+            buf.clear();
+            return None;
+        }
+        let node = serde_json::json!({"type": "markdown", "content": trimmed});
+        buf.clear();
+        Some(node)
+    }
+
+    /// Push a node into the deepest open context.
+    fn push_node(
+        node: Value,
+        h2_title: &Option<String>,
+        h2_children: &mut Vec<Value>,
+        h1_title: &Option<String>,
+        h1_children: &mut Vec<Value>,
+        root: &mut Vec<Value>,
+    ) {
+        if h2_title.is_some() {
+            h2_children.push(node);
+        } else if h1_title.is_some() {
+            h1_children.push(node);
+        } else {
+            root.push(node);
+        }
+    }
+
+    /// Close h2 section, pushing it into h1 or root.
+    fn close_h2(
+        h2_title: &mut Option<String>,
+        h2_children: &mut Vec<Value>,
+        buf: &mut String,
+        h1_title: &Option<String>,
+        h1_children: &mut Vec<Value>,
+        root: &mut Vec<Value>,
+    ) {
+        if let Some(node) = flush_buf(buf) {
+            if h2_title.is_some() {
+                h2_children.push(node);
+            } else if h1_title.is_some() {
+                h1_children.push(node);
+            } else {
+                root.push(node);
+            }
+        }
+        if let Some(title) = h2_title.take() {
+            let section = serde_json::json!({
+                "type": "section",
+                "title": title,
+                "children": std::mem::take(h2_children),
+            });
+            if h1_title.is_some() {
+                h1_children.push(section);
+            } else {
+                root.push(section);
+            }
+        }
+    }
+
+    fn is_hr(line: &str) -> bool {
+        line.len() >= 3
+            && (line.starts_with("---") || line.starts_with("***") || line.starts_with("___"))
+            && line
+                .chars()
+                .all(|c| c == '-' || c == '*' || c == '_' || c == ' ')
+    }
+
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+
+        if is_hr(trimmed) {
+            if let Some(node) = flush_buf(&mut buf) {
+                push_node(
+                    node,
+                    &h2_title,
+                    &mut h2_children,
+                    &h1_title,
+                    &mut h1_children,
+                    &mut root,
+                );
+            }
+            let divider = serde_json::json!({"type": "divider"});
+            push_node(
+                divider,
+                &h2_title,
+                &mut h2_children,
+                &h1_title,
+                &mut h1_children,
+                &mut root,
+            );
+            continue;
+        }
+
+        // H1 heading — close everything and start fresh section
+        if let Some(title) = trimmed.strip_prefix("# ") {
+            close_h2(
+                &mut h2_title,
+                &mut h2_children,
+                &mut buf,
+                &h1_title,
+                &mut h1_children,
+                &mut root,
+            );
+            if let Some(node) = flush_buf(&mut buf) {
+                if h1_title.is_some() {
+                    h1_children.push(node);
+                } else {
+                    root.push(node);
+                }
+            }
+            if let Some(t) = h1_title.take() {
+                root.push(serde_json::json!({
+                    "type": "section",
+                    "title": t,
+                    "children": std::mem::take(&mut h1_children),
+                }));
+            }
+            h1_title = Some(title.to_string());
+            continue;
+        }
+
+        // H2 heading — close current h2 and start new one
+        if let Some(title) = trimmed.strip_prefix("## ") {
+            close_h2(
+                &mut h2_title,
+                &mut h2_children,
+                &mut buf,
+                &h1_title,
+                &mut h1_children,
+                &mut root,
+            );
+            h2_title = Some(title.to_string());
+            continue;
+        }
+
+        buf.push_str(line);
+        buf.push('\n');
+    }
+
+    // Close remaining
+    close_h2(
+        &mut h2_title,
+        &mut h2_children,
+        &mut buf,
+        &h1_title,
+        &mut h1_children,
+        &mut root,
+    );
+    if let Some(node) = flush_buf(&mut buf) {
+        if h1_title.is_some() {
+            h1_children.push(node);
+        } else {
+            root.push(node);
+        }
+    }
+    if let Some(t) = h1_title.take() {
+        root.push(serde_json::json!({
+            "type": "section",
+            "title": t,
+            "children": h1_children,
+        }));
+    }
+
+    Value::Array(root)
+}
+
 // ── MCP Server ────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -537,6 +765,57 @@ impl NiobiumServer {
     }
 
     #[tool(
+        description = "Render markdown as a native paneled page. Headings become titled section panels \
+        (# = top-level, ## = nested), horizontal rules (---) become dividers, everything else renders \
+        as rich markdown content inside the current section. Content-only — returns {dismissed: true} \
+        when the user closes. Use this when you have markdown content that should look like a \
+        structured document with panels, not a flat text wall."
+    )]
+    async fn md_to_page(
+        &self,
+        Parameters(input): Parameters<MdToPageInput>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let children = md_to_page_nodes(&input.markdown);
+        let request_id = Uuid::new_v4();
+        let title = input.title.unwrap_or_else(|| "Page".to_string());
+        let width = input.width.as_ref().map(resolve_width);
+        let height = input.height.as_ref().map(resolve_height);
+        let accent = input.accent.as_deref().map(resolve_accent);
+
+        let response = self
+            .bus
+            .request(
+                request_id,
+                Event::ShowPage {
+                    request_id,
+                    children,
+                    title,
+                    prefill: None,
+                    width,
+                    height,
+                    density: input.density,
+                    animate: input.animate,
+                    accent,
+                },
+            )
+            .await
+            .ok_or_else(|| Self::mcp_err("no response from UI".to_string()))?;
+
+        match response {
+            Event::PageDismissed { .. } => {
+                let result = serde_json::json!({"dismissed": true});
+                Ok(CallToolResult::success(vec![Content::text(
+                    result.to_string(),
+                )]))
+            }
+            Event::PageCancelled { .. } => {
+                Err(Self::mcp_err("User cancelled the page".to_string()))
+            }
+            other => Err(Self::mcp_err(format!("unexpected response: {other:?}"))),
+        }
+    }
+
+    #[tool(
         description = "Show a native confirmation dialog. Returns true if the user confirmed, \
         false if they declined. Optional display params: width/height (preset mode or pixels), \
         accent (color name or #RRGGBB)."
@@ -683,6 +962,8 @@ impl ServerHandler for NiobiumServer {
                  PREFER these tools over shell workarounds (read -p, select, dialog, whiptail, \
                  zenity) whenever you need user input or want to display rich content. \
                  Use show_form instead of prompting in the terminal. \
+                 Use md_to_page to render markdown as a structured paneled document \
+                 (headings become titled panels, --- become dividers). \
                  Use show_page when you need to mix explanatory content with form fields. \
                  Use show_confirmation instead of yes/no shell prompts. \
                  Use show_output instead of echoing long text to stdout.\n\n\
@@ -698,5 +979,67 @@ impl ServerHandler for NiobiumServer {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             ..Default::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_md_to_page_basic() {
+        let md = "# Introduction\nHello world\n\n## Details\nSome details here\n\n---\n\nMore text\n\n# Conclusion\nDone";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+
+        assert_eq!(arr.len(), 2, "two top-level sections");
+        assert_eq!(arr[0]["title"], "Introduction");
+        assert_eq!(arr[1]["title"], "Conclusion");
+
+        // Introduction has: markdown("Hello world"), section(Details)
+        let h1_children = arr[0]["children"].as_array().unwrap();
+        assert_eq!(h1_children[0]["type"], "markdown");
+        assert!(
+            h1_children[0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("Hello")
+        );
+        assert_eq!(h1_children[1]["type"], "section");
+        assert_eq!(h1_children[1]["title"], "Details");
+
+        // Details section has: markdown, divider, markdown
+        let h2_children = h1_children[1]["children"].as_array().unwrap();
+        assert_eq!(h2_children[0]["type"], "markdown");
+        assert_eq!(h2_children[1]["type"], "divider");
+        assert_eq!(h2_children[2]["type"], "markdown");
+        assert!(
+            h2_children[2]["content"]
+                .as_str()
+                .unwrap()
+                .contains("More text")
+        );
+    }
+
+    #[test]
+    fn test_md_to_page_no_headings() {
+        let md = "Just some text\n\n---\n\nMore text";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+
+        assert_eq!(arr[0]["type"], "markdown");
+        assert_eq!(arr[1]["type"], "divider");
+        assert_eq!(arr[2]["type"], "markdown");
+    }
+
+    #[test]
+    fn test_md_to_page_multiple_h1() {
+        let md = "# First\nContent 1\n# Second\nContent 2";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["title"], "First");
+        assert_eq!(arr[1]["title"], "Second");
     }
 }
