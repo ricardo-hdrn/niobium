@@ -9,6 +9,7 @@ class PageNode {
   final String? key;
   final Map<String, dynamic>? field;
   final List<PageNode>? children;
+  final Map<String, dynamic> props; // type-specific config
 
   PageNode({
     required this.type,
@@ -17,9 +18,16 @@ class PageNode {
     this.key,
     this.field,
     this.children,
+    this.props = const {},
   });
 
   factory PageNode.fromJson(Map<String, dynamic> json) {
+    const knownKeys = {'type', 'content', 'title', 'key', 'field', 'children', 'props'};
+    final explicitProps = json['props'] as Map<String, dynamic>? ?? {};
+    // Merge any unknown top-level keys into props
+    final extraProps = Map<String, dynamic>.fromEntries(
+      json.entries.where((e) => !knownKeys.contains(e.key)),
+    );
     return PageNode(
       type: json['type'] as String,
       content: json['content'] as String?,
@@ -29,6 +37,7 @@ class PageNode {
       children: (json['children'] as List<dynamic>?)
           ?.map((c) => PageNode.fromJson(c as Map<String, dynamic>))
           .toList(),
+      props: {...explicitProps, ...extraProps},
     );
   }
 
