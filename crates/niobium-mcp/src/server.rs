@@ -274,9 +274,11 @@ pub struct MdToPageInput {
     /// - `## Subtitle` → nested section
     ///
     /// Horizontal rules (`---`) become dividers.
+    /// Fenced code blocks with language `niobium` are parsed as inline JSON nodes
+    /// (input fields, sections, etc.) — enabling interactive forms within markdown.
     /// Everything else renders as rich markdown content inside the current section.
     #[schemars(
-        description = "Markdown text. # headings become titled panels, --- become dividers"
+        description = "Markdown text. # headings become titled panels, --- become dividers, ```niobium blocks embed interactive components (inputs, sections)"
     )]
     pub markdown: String,
 
@@ -394,8 +396,95 @@ fn md_to_page_nodes(markdown: &str) -> Value {
                 .all(|c| c == '-' || c == '*' || c == '_' || c == ' ')
     }
 
+    // Track fenced code blocks: None = not in a block, Some(true) = niobium block, Some(false) = regular code
+    let mut in_fence: Option<bool> = None;
+    let mut nb_buf = String::new();
+
     for line in markdown.lines() {
         let trimmed = line.trim();
+
+        // Fenced code block handling
+        if trimmed.starts_with("```") {
+            match in_fence {
+                None => {
+                    // Opening fence
+                    let lang = trimmed.trim_start_matches('`').trim();
+                    if lang == "niobium" || lang.starts_with("niobium ") {
+                        // Flush markdown before the niobium block
+                        if let Some(node) = flush_buf(&mut buf) {
+                            push_node(
+                                node,
+                                &h2_title,
+                                &mut h2_children,
+                                &h1_title,
+                                &mut h1_children,
+                                &mut root,
+                            );
+                        }
+                        in_fence = Some(true);
+                        nb_buf.clear();
+                    } else {
+                        // Regular code block — pass through as markdown
+                        in_fence = Some(false);
+                        buf.push_str(line);
+                        buf.push('\n');
+                    }
+                    continue;
+                }
+                Some(true) => {
+                    // Closing niobium fence — parse JSON and inject node(s)
+                    in_fence = None;
+                    let json_str = nb_buf.trim();
+                    if !json_str.is_empty() {
+                        if let Ok(val) = serde_json::from_str::<Value>(json_str) {
+                            // Support both single node and array of nodes
+                            if let Some(arr) = val.as_array() {
+                                for node in arr {
+                                    push_node(
+                                        node.clone(),
+                                        &h2_title,
+                                        &mut h2_children,
+                                        &h1_title,
+                                        &mut h1_children,
+                                        &mut root,
+                                    );
+                                }
+                            } else {
+                                push_node(
+                                    val,
+                                    &h2_title,
+                                    &mut h2_children,
+                                    &h1_title,
+                                    &mut h1_children,
+                                    &mut root,
+                                );
+                            }
+                        }
+                    }
+                    nb_buf.clear();
+                    continue;
+                }
+                Some(false) => {
+                    // Closing regular code fence — pass through
+                    in_fence = None;
+                    buf.push_str(line);
+                    buf.push('\n');
+                    continue;
+                }
+            }
+        }
+
+        // Inside a fenced block
+        if let Some(is_nb) = in_fence {
+            if is_nb {
+                nb_buf.push_str(line);
+                nb_buf.push('\n');
+            } else {
+                buf.push_str(line);
+                buf.push('\n');
+            }
+            continue;
+        }
 
         if is_hr(trimmed) {
             if let Some(node) = flush_buf(&mut buf) {
@@ -767,9 +856,10 @@ impl NiobiumServer {
     #[tool(
         description = "Render markdown as a native paneled page. Headings become titled section panels \
         (# = top-level, ## = nested), horizontal rules (---) become dividers, everything else renders \
-        as rich markdown content inside the current section. Content-only — returns {dismissed: true} \
-        when the user closes. Use this when you have markdown content that should look like a \
-        structured document with panels, not a flat text wall."
+        as rich markdown content inside the current section. Embed interactive components via \
+        ```niobium fenced blocks containing JSON nodes (inputs, sections, etc.). \
+        If niobium blocks contain inputs, returns collected values. \
+        Otherwise returns {dismissed: true} when closed."
     )]
     async fn md_to_page(
         &self,
@@ -802,6 +892,11 @@ impl NiobiumServer {
             .ok_or_else(|| Self::mcp_err("no response from UI".to_string()))?;
 
         match response {
+            Event::PageSubmitted { data, .. } => {
+                let json_str =
+                    serde_json::to_string_pretty(&data).unwrap_or_else(|_| data.to_string());
+                Ok(CallToolResult::success(vec![Content::text(json_str)]))
+            }
             Event::PageDismissed { .. } => {
                 let result = serde_json::json!({"dismissed": true});
                 Ok(CallToolResult::success(vec![Content::text(
@@ -1041,5 +1136,37 @@ mod tests {
         assert_eq!(arr.len(), 2);
         assert_eq!(arr[0]["title"], "First");
         assert_eq!(arr[1]["title"], "Second");
+    }
+
+    #[test]
+    fn test_md_to_page_niobium_blocks() {
+        let md = "# Review\n\nRate this:\n\n```niobium\n{\"type\": \"input\", \"key\": \"rating\", \"field\": {\"type\": \"string\", \"enum\": [\"Good\", \"Bad\"]}}\n```\n\nThanks!";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+
+        assert_eq!(arr.len(), 1);
+        let children = arr[0]["children"].as_array().unwrap();
+
+        // markdown("Rate this:"), input node, markdown("Thanks!")
+        assert_eq!(children[0]["type"], "markdown");
+        assert!(children[0]["content"].as_str().unwrap().contains("Rate"));
+        assert_eq!(children[1]["type"], "input");
+        assert_eq!(children[1]["key"], "rating");
+        assert_eq!(children[2]["type"], "markdown");
+        assert!(children[2]["content"].as_str().unwrap().contains("Thanks"));
+    }
+
+    #[test]
+    fn test_md_to_page_regular_code_blocks_pass_through() {
+        let md = "Some code:\n\n```python\ndef foo():\n    pass\n```\n\nDone.";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+
+        // Everything is one markdown node (code block passes through)
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["type"], "markdown");
+        let content = arr[0]["content"].as_str().unwrap();
+        assert!(content.contains("```python"));
+        assert!(content.contains("def foo"));
     }
 }
