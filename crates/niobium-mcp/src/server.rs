@@ -300,9 +300,10 @@ pub struct MdToPageInput {
     ///
     /// Everything else renders as rich markdown content inside the current section.
     #[schemars(
-        description = "Markdown text. # headings become titled panels, --- become dividers, \
-        ```niobium blocks embed interactive JSON components, \
-        <!-- nb:xxx --> HTML comments embed rich components (stat, progress, badge, image, alert, card, collapse, hero, row/col, tabs/tab, gap)"
+        description = "Markdown text. # headings become titled panels, --- become dividers. \
+        Form inputs: <!-- nb:input key=\"name\" type=\"string\" title=\"Name\" --> \
+        (supports type=string/number/boolean, format=date/date-time/time, enum='[...]'). \
+        Display: <!-- nb:xxx --> for stat, progress, badge, image, alert, card, collapse, hero, row/col, tabs/tab, gap"
     )]
     pub markdown: String,
 
@@ -361,11 +362,24 @@ fn parse_nb_attrs(attr_str: &str) -> (HashMap<String, Value>, Option<String>) {
             if !before_eq.contains(' ') {
                 let key = before_eq.trim();
                 let after_eq = &rest[eq_pos + 1..];
+                // Double-quoted value: key="value"
                 if let Some(quoted) = after_eq.strip_prefix('"')
                     && let Some(end_quote) = quoted.find('"')
                 {
                     let val_str = &quoted[..end_quote];
                     let value = try_parse_number(val_str);
+                    props.insert(key.to_string(), value);
+                    rest = &quoted[end_quote + 1..];
+                    continue;
+                }
+                // Single-quoted value: key='value' (for JSON arrays/objects)
+                if let Some(quoted) = after_eq.strip_prefix('\'')
+                    && let Some(end_quote) = quoted.find('\'')
+                {
+                    let val_str = &quoted[..end_quote];
+                    // Try parsing as JSON first, fall back to string
+                    let value = serde_json::from_str(val_str)
+                        .unwrap_or_else(|_| Value::String(val_str.to_string()));
                     props.insert(key.to_string(), value);
                     rest = &quoted[end_quote + 1..];
                     continue;
@@ -431,7 +445,7 @@ fn parse_nb_comment(line: &str) -> Option<(&str, &str, &str)> {
 
 /// Which nb: tags are self-closing (no children, no nb:end needed).
 fn is_self_closing_nb(tag: &str) -> bool {
-    matches!(tag, "stat" | "progress" | "gap")
+    matches!(tag, "stat" | "progress" | "gap" | "input")
 }
 
 /// Which nb: tags need content between them and nb:end (inline content, not children).
@@ -817,14 +831,47 @@ fn md_to_page_nodes(markdown: &str) -> Value {
                 continue;
             }
 
-            let (props, title) = parse_nb_attrs(attr_str);
+            let (mut props, title) = parse_nb_attrs(attr_str);
 
             if is_self_closing_nb(tag) {
-                // Self-closing: stat, progress
-                let mut node = serde_json::json!({ "type": tag });
-                if !props.is_empty() {
-                    node["props"] = serde_json::to_value(&props).unwrap_or_default();
-                }
+                let node = if tag == "input" {
+                    // Input node: key= becomes node key, remaining props become JSON Schema field
+                    let key = props
+                        .remove("key")
+                        .and_then(|v| match v {
+                            Value::String(s) => Some(s),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    if key.is_empty() {
+                        continue; // skip input without key
+                    }
+                    // Build JSON Schema field from remaining props
+                    let mut field = serde_json::Map::new();
+                    // title was already extracted — put it back into the field
+                    if let Some(t) = &title {
+                        field.insert("title".to_string(), Value::String(t.clone()));
+                    }
+                    for (k, v) in props {
+                        field.insert(k, v);
+                    }
+                    // Default type to "string" if not specified
+                    field
+                        .entry("type".to_string())
+                        .or_insert(Value::String("string".to_string()));
+                    serde_json::json!({
+                        "type": "input",
+                        "key": key,
+                        "field": field,
+                    })
+                } else {
+                    // Self-closing: stat, progress, gap
+                    let mut node = serde_json::json!({ "type": tag });
+                    if !props.is_empty() {
+                        node["props"] = serde_json::to_value(&props).unwrap_or_default();
+                    }
+                    node
+                };
                 push_node(
                     node,
                     &mut nb_stack,
@@ -1293,10 +1340,21 @@ impl NiobiumServer {
     #[tool(
         description = "Render markdown as a native paneled page. Headings become titled section panels \
         (# = top-level, ## = nested), horizontal rules (---) become dividers, everything else renders \
-        as rich markdown content. Embed components via ```niobium JSON blocks or <!-- nb:xxx --> HTML comments: \
-        self-closing (stat, progress, gap), inline-content (badge, image), and containers \
+        as rich markdown content. \
+        \
+        FORM INPUTS — embed fields directly in markdown with <!-- nb:input -->: \
+        <!-- nb:input key=\"name\" type=\"string\" title=\"Your Name\" --> (text field), \
+        <!-- nb:input key=\"age\" type=\"number\" title=\"Age\" min=\"18\" max=\"99\" --> (number), \
+        <!-- nb:input key=\"agree\" type=\"boolean\" title=\"I agree\" --> (checkbox), \
+        <!-- nb:input key=\"date\" type=\"string\" format=\"date\" title=\"When\" --> (date picker), \
+        <!-- nb:input key=\"role\" type=\"string\" title=\"Role\" enum='[\"admin\",\"user\",\"viewer\"]' --> (dropdown). \
+        key= is required, type= defaults to string. Use single quotes for JSON values (enum, items). \
+        When inputs are present, returns collected values on submit. \
+        \
+        DISPLAY COMPONENTS — <!-- nb:xxx --> HTML comments: \
+        self-closing (stat, progress, gap), inline-content (badge, image), containers \
         (alert, card, collapse, hero, row/col, tabs/tab). \
-        If the page has inputs, returns collected values. Otherwise returns {dismissed: true} when closed."
+        Without inputs, returns {dismissed: true} when closed."
     )]
     async fn md_to_page(
         &self,
@@ -1770,5 +1828,82 @@ mod tests {
         let children = arr[0]["children"].as_array().unwrap();
         // Inside hero, # heading is treated as markdown (not a section)
         assert_eq!(children[0]["type"], "markdown");
+    }
+
+    #[test]
+    fn test_md_to_page_nb_input_basic() {
+        let md = "# Settings\n<!-- nb:input key=\"name\" title=\"Your Name\" -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        let section = &arr[0];
+        let children = section["children"].as_array().unwrap();
+        assert_eq!(children[0]["type"], "input");
+        assert_eq!(children[0]["key"], "name");
+        assert_eq!(children[0]["field"]["title"], "Your Name");
+        assert_eq!(children[0]["field"]["type"], "string"); // default
+    }
+
+    #[test]
+    fn test_md_to_page_nb_input_number() {
+        let md =
+            "<!-- nb:input key=\"age\" type=\"number\" title=\"Age\" min=\"0\" max=\"150\" -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "input");
+        assert_eq!(arr[0]["key"], "age");
+        assert_eq!(arr[0]["field"]["type"], "number");
+        assert_eq!(arr[0]["field"]["min"], 0);
+        assert_eq!(arr[0]["field"]["max"], 150);
+    }
+
+    #[test]
+    fn test_md_to_page_nb_input_boolean() {
+        let md = "<!-- nb:input key=\"agree\" type=\"boolean\" title=\"I agree to the terms\" -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "input");
+        assert_eq!(arr[0]["field"]["type"], "boolean");
+    }
+
+    #[test]
+    fn test_md_to_page_nb_input_enum_single_quotes() {
+        let md = r#"<!-- nb:input key="role" title="Role" enum='["admin","user","viewer"]' -->"#;
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "input");
+        assert_eq!(arr[0]["key"], "role");
+        let enums = arr[0]["field"]["enum"].as_array().unwrap();
+        assert_eq!(enums.len(), 3);
+        assert_eq!(enums[0], "admin");
+    }
+
+    #[test]
+    fn test_md_to_page_nb_input_date() {
+        let md = "<!-- nb:input key=\"when\" type=\"string\" format=\"date\" title=\"Date\" -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert_eq!(arr[0]["field"]["format"], "date");
+    }
+
+    #[test]
+    fn test_md_to_page_nb_input_no_key_skipped() {
+        let md = "<!-- nb:input type=\"string\" title=\"No Key\" -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        assert!(arr.is_empty()); // skipped — no key
+    }
+
+    #[test]
+    fn test_md_to_page_nb_input_mixed_with_content() {
+        let md = "# Feedback\nPlease rate your experience:\n<!-- nb:input key=\"rating\" type=\"number\" title=\"Rating (1-5)\" min=\"1\" max=\"5\" -->\nAny comments?\n<!-- nb:input key=\"comments\" title=\"Comments\" -->";
+        let nodes = md_to_page_nodes(md);
+        let arr = nodes.as_array().unwrap();
+        let children = arr[0]["children"].as_array().unwrap();
+        assert_eq!(children[0]["type"], "markdown");
+        assert_eq!(children[1]["type"], "input");
+        assert_eq!(children[1]["key"], "rating");
+        assert_eq!(children[2]["type"], "markdown");
+        assert_eq!(children[3]["type"], "input");
+        assert_eq!(children[3]["key"], "comments");
     }
 }

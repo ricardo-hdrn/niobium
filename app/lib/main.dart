@@ -475,22 +475,24 @@ class _NiobiumAppState extends State<NiobiumApp> with WindowListener {
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: _scaffoldMessengerKey,
       theme: buildNiobiumTheme(),
-      home: Container(
-        decoration: const BoxDecoration(
-          gradient: NbColors.bgGradient,
-          borderRadius: BorderRadius.all(Radius.circular(10)),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeInCubic,
-          child: _currentView ??
-              const Scaffold(
-                key: ValueKey('idle'),
-                backgroundColor: Colors.transparent,
-                body: SizedBox.shrink(),
-              ),
+      home: DragToResizeArea(
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: NbColors.bgGradient,
+            borderRadius: BorderRadius.all(Radius.circular(10)),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            child: _currentView ??
+                const Scaffold(
+                  key: ValueKey('idle'),
+                  backgroundColor: Colors.transparent,
+                  body: SizedBox.shrink(),
+                ),
+          ),
         ),
       ),
     );
